@@ -4,20 +4,27 @@ const { interpretSchedule } = require('./scheduleParser');
 const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método não permitido. Use POST.' });
-  }
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  const { user, pass } = req.body || {};
-
-  if (!user || !pass) {
-    return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
   let browser;
   const isDev = process.env.NODE_ENV === 'development';
 
   try {
+    // Lê credenciais do corpo da requisição
+    const { user, pass } = req.body;
+
+    if (!user || !pass) {
+      throw new Error('Usuário e senha são obrigatórios.');
+    }
+
     browser = await puppeteer.launch(
       isDev
         ? {
@@ -96,6 +103,7 @@ module.exports = async function handler(req, res) {
 
     await browser.close();
     return res.status(200).json({ dadosInstitucionais, horarios: detailedSchedule });
+
   } catch (error) {
     if (browser) await browser.close();
     return res.status(500).json({ error: error.message || 'Erro interno' });
