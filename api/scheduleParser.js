@@ -1,7 +1,13 @@
-// scheduleParser.js
-const fs = require('fs').promises;
+const fs = require('fs').promises; // pode manter, mas não usaremos para salvar arquivo aqui
 const { daysMap, timeSlots } = require('./constants');
 
+/**
+ * Interpreta o schedule bruto e transforma em array detalhado de horários,
+ * expandindo códigos para dia, horário etc.
+ * 
+ * @param {Array} schedule - array com {semestre, disciplina, turma, rawCodes}
+ * @returns {Array} detailed - array com horários detalhados
+ */
 function interpretSchedule(schedule) {
   const detailed = [];
   schedule.forEach(item => {
@@ -15,6 +21,7 @@ function interpretSchedule(schedule) {
           const dayName = daysMap[d] || `Desconhecido(${d})`;
           const time = (timeSlots[period] && timeSlots[period][s]) || '??:??-??:??';
           detailed.push({
+            semestre: item.semestre,
             disciplina: item.disciplina,
             turma: item.turma,
             dia: dayName,
@@ -29,10 +36,17 @@ function interpretSchedule(schedule) {
   return detailed;
 }
 
-async function gerarTabelaSimplificada() {
-  const raw = JSON.parse(await fs.readFile('./horarios.json', 'utf8'));
+/**
+ * Gera a tabela simplificada agrupando horários contínuos da mesma disciplina, turma, dia e período.
+ * 
+ * @param {Array} detailedSchedule - array de horários detalhados gerados pela interpretSchedule
+ * @returns {Array} grouped - tabela simplificada pronta para frontend
+ */
+function gerarTabelaSimplificada(detailedSchedule) {
   const dayOrder = ['Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
-  raw.sort((a, b) => {
+
+  // Ordena por dia e horário inicial
+  detailedSchedule.sort((a, b) => {
     const dayDiff = dayOrder.indexOf(a.dia) - dayOrder.indexOf(b.dia);
     if (dayDiff !== 0) return dayDiff;
     const [aStart] = a.horário.split('-');
@@ -41,7 +55,7 @@ async function gerarTabelaSimplificada() {
   });
 
   const grouped = [];
-  raw.forEach(row => {
+  detailedSchedule.forEach(row => {
     const [start, end] = row.horário.split('-');
     const last = grouped[grouped.length - 1];
     if (last
@@ -50,13 +64,15 @@ async function gerarTabelaSimplificada() {
         && last.dia === row.dia
         && last.período === row.período
     ) {
-      const [lastEnd] = last.horário.split('-').slice(1);
+      const [, lastEnd] = last.horário.split('-');
       if (lastEnd === start) {
+        // Junta horários contínuos
         last.horário = `${last.horário.split('-')[0]}-${end}`;
         return;
       }
     }
     grouped.push({
+      semestre: row.semestre,
       disciplina: row.disciplina,
       turma: row.turma,
       dia: row.dia,
@@ -66,9 +82,7 @@ async function gerarTabelaSimplificada() {
     });
   });
 
-  await fs.writeFile('./horarios_simplificados.json', JSON.stringify(grouped, null, 2), 'utf8');
-  console.log('✅ Tabela simplificada salva em horarios_simplificados.json:');
-  console.table(grouped);
+  return grouped;
 }
 
 module.exports = { interpretSchedule, gerarTabelaSimplificada };
