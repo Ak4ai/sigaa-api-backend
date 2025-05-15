@@ -1,26 +1,26 @@
 // /api/scraper.js
-const chromium = require('chrome-aws-lambda');
+const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const { interpretSchedule } = require('./scheduleParser');
 const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
-  let browser = null;
+  let browser;
   const isDev = process.env.NODE_ENV === 'development';
 
   try {
     browser = await puppeteer.launch(
       isDev
         ? {
-            // Desenvolvimento local: aponta para o Chrome instalado no Windows
+            // Dev local: usa Chrome instalado no Windows
             executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
           }
         : {
-            // Produção no Vercel: usa o Chromium do chrome-aws-lambda
+            // Prod Vercel: usa Chromium do @sparticuz/chromium
             args: chromium.args,
-            executablePath: await chromium.executablePath,
+            executablePath: await chromium.executablePath(),
             headless: chromium.headless,
           }
     );
@@ -28,24 +28,23 @@ module.exports = async function handler(req, res) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
 
+    // Login SIGAA
     await page.goto('https://sig.cefetmg.br/sigaa/verTelaLogin.do', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
-
     const user = process.env.SIGAA_USER;
     const pass = process.env.SIGAA_PASS;
-
     await page.type('#conteudo input[type=text]', user);
     await page.type('#conteudo input[type=password]', pass);
     await Promise.all([
       page.click('#conteudo input[type=submit]'),
-      page.waitForSelector('#agenda-docente table tbody tr', { timeout: 60000 })
+      page.waitForSelector('#agenda-docente table tbody tr', { timeout: 60000 }),
     ]);
 
     await delay(2000);
 
-    // Dados institucionais
+    // Extrai dados institucionais
     const dadosInstitucionais = await page.$$eval(
       '#agenda-docente table tbody tr',
       rows => {
@@ -60,7 +59,7 @@ module.exports = async function handler(req, res) {
       }
     );
 
-    // Horários
+    // Extrai horários
     await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
     const schedule = await page.$$eval('tbody tr', rows => {
       let term = '';
@@ -71,8 +70,10 @@ module.exports = async function handler(req, res) {
         if (row.querySelector('form[id^="form_acessarTurmaVirtual"]')) {
           const desc = row.querySelector('td.descricao');
           const name = desc.querySelector('a')?.innerText.trim() ?? desc.innerText.trim();
-          const [turmaInfo, horarioInfo] = Array.from(row.querySelectorAll('td.info')).map(td => td.innerText.trim());
-          data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes: horarioInfo.split('(')[0].trim() });
+          const infos = Array.from(row.querySelectorAll('td.info')).map(td => td.innerText.trim());
+          const turmaInfo = infos[0] || '';
+          const rawCodes  = (infos[1] || '').split('(')[0].trim();
+          data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes });
         }
       }
       return data;
