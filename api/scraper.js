@@ -1,19 +1,27 @@
 // /api/scraper.js
-const puppeteer = require('puppeteer');
+const chromium = require('chrome-aws-lambda');
+const puppeteer = require('puppeteer-core');
 const { interpretSchedule } = require('./scheduleParser');
 const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
+  let browser = null;
+
   try {
-    const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath || '/usr/bin/chromium-browser',
+      headless: chromium.headless,
+    });
+
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+
     await page.goto('https://sig.cefetmg.br/sigaa/verTelaLogin.do', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
 
-    // Use variáveis de ambiente para segurança na autenticação!
     const user = process.env.SIGAA_USER || '14669329618';
     const pass = process.env.SIGAA_PASS || '@Q1w2e3r4t5';
 
@@ -23,9 +31,9 @@ module.exports = async function handler(req, res) {
       page.click('#conteudo input[type=submit]'),
       page.waitForSelector('#agenda-docente table tbody tr', { timeout: 60000 })
     ]);
+
     await delay(2000);
 
-    // Pegando dados institucionais
     const dadosInstitucionais = await page.$$eval(
       '#agenda-docente table tbody tr',
       rows => {
@@ -42,14 +50,16 @@ module.exports = async function handler(req, res) {
       }
     );
 
-    // Pegando horários
     await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
     const schedule = await page.$$eval('tbody tr', rows => {
       let currentTerm = '';
       const data = [];
       rows.forEach(row => {
         const termTd = row.querySelector('td[colspan]');
-        if (termTd) { currentTerm = termTd.innerText.trim(); return; }
+        if (termTd) {
+          currentTerm = termTd.innerText.trim();
+          return;
+        }
         if (row.querySelector('form[id^="form_acessarTurmaVirtual"]')) {
           const descricaoTd = row.querySelector('td.descricao');
           const courseName = descricaoTd.querySelector('a')?.innerText.trim() ?? descricaoTd.innerText.trim();
@@ -70,7 +80,9 @@ module.exports = async function handler(req, res) {
       dadosInstitucionais,
       horarios: detailedSchedule,
     });
+
   } catch (error) {
+    if (browser !== null) await browser.close();
     res.status(500).json({ error: error.message });
   }
 };
