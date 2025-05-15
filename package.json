@@ -19,7 +19,7 @@
   "homepage": "https://github.com/Ak4ai/sigaa-api-backend#readme",
   "description": "",
   "dependencies": {
-    "chrome-aws-lambda": "^1.20.1",
-    "puppeteer-core": "^24.8.2"
+   "chrome-aws-lambda": "10.1.0",
+   "puppeteer-core":    "10.1.0"
   }
 }
