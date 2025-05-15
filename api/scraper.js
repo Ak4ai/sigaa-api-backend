@@ -4,8 +4,17 @@ const { interpretSchedule } = require('./scheduleParser');
 const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
-  let browser;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Método não permitido. Use POST.' });
+  }
 
+  const { user, pass } = req.body || {};
+
+  if (!user || !pass) {
+    return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+  }
+
+  let browser;
   const isDev = process.env.NODE_ENV === 'development';
 
   try {
@@ -31,13 +40,6 @@ module.exports = async function handler(req, res) {
       timeout: 60000,
     });
 
-    const user = process.env.SIGAA_USER;
-    const pass = process.env.SIGAA_PASS;
-
-    if (!user || !pass) {
-      throw new Error('Credenciais do SIGAA não definidas nas variáveis de ambiente');
-    }
-
     await page.type('#conteudo input[type=text]', user);
     await page.type('#conteudo input[type=password]', pass);
 
@@ -46,7 +48,6 @@ module.exports = async function handler(req, res) {
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
     ]);
 
-    // Aguarda a agenda carregar
     await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
 
     const dadosInstitucionais = await page.$$eval(
@@ -90,10 +91,6 @@ module.exports = async function handler(req, res) {
       }
       return data;
     });
-
-    if (!Array.isArray(schedule)) {
-      throw new Error('Erro ao interpretar os horários - retorno inesperado');
-    }
 
     const detailedSchedule = interpretSchedule(schedule);
 
