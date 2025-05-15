@@ -6,13 +6,24 @@ const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
   let browser = null;
+  const isDev = process.env.NODE_ENV === 'development';
 
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath || '/usr/bin/chromium-browser',
-      headless: chromium.headless,
-    });
+    browser = await puppeteer.launch(
+      isDev
+        ? {
+            // Desenvolvimento local: aponta para o Chrome instalado no Windows
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+          }
+        : {
+            // Produção no Vercel: usa o Chromium do chrome-aws-lambda
+            args: chromium.args,
+            executablePath: await chromium.executablePath,
+            headless: chromium.headless,
+          }
+    );
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
@@ -22,8 +33,8 @@ module.exports = async function handler(req, res) {
       timeout: 60000,
     });
 
-    const user = process.env.SIGAA_USER || '14669329618';
-    const pass = process.env.SIGAA_PASS || '@Q1w2e3r4t5';
+    const user = process.env.SIGAA_USER;
+    const pass = process.env.SIGAA_PASS;
 
     await page.type('#conteudo input[type=text]', user);
     await page.type('#conteudo input[type=password]', pass);
@@ -34,6 +45,7 @@ module.exports = async function handler(req, res) {
 
     await delay(2000);
 
+    // Dados institucionais
     const dadosInstitucionais = await page.$$eval(
       '#agenda-docente table tbody tr',
       rows => {
@@ -41,48 +53,37 @@ module.exports = async function handler(req, res) {
         for (const row of rows) {
           const cols = Array.from(row.querySelectorAll('td'));
           if (cols.length === 2) {
-            const label = cols[0].innerText.replace(':', '').trim();
-            const valor = cols[1].innerText.trim();
-            obj[label] = valor;
+            obj[cols[0].innerText.replace(':', '').trim()] = cols[1].innerText.trim();
           }
         }
         return obj;
       }
     );
 
+    // Horários
     await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
     const schedule = await page.$$eval('tbody tr', rows => {
-      let currentTerm = '';
+      let term = '';
       const data = [];
-      rows.forEach(row => {
-        const termTd = row.querySelector('td[colspan]');
-        if (termTd) {
-          currentTerm = termTd.innerText.trim();
-          return;
-        }
+      for (const row of rows) {
+        const span = row.querySelector('td[colspan]');
+        if (span) { term = span.innerText.trim(); continue; }
         if (row.querySelector('form[id^="form_acessarTurmaVirtual"]')) {
-          const descricaoTd = row.querySelector('td.descricao');
-          const courseName = descricaoTd.querySelector('a')?.innerText.trim() ?? descricaoTd.innerText.trim();
-          const turmaInfo = row.querySelectorAll('td.info')[0]?.innerText.trim() || '';
-          const horarioInfo = row.querySelectorAll('td.info')[1]?.innerText.trim() || '';
-          const codesOnly = horarioInfo.split('(')[0].trim();
-          data.push({ semestre: currentTerm, disciplina: courseName, turma: turmaInfo, rawCodes: codesOnly });
+          const desc = row.querySelector('td.descricao');
+          const name = desc.querySelector('a')?.innerText.trim() ?? desc.innerText.trim();
+          const [turmaInfo, horarioInfo] = Array.from(row.querySelectorAll('td.info')).map(td => td.innerText.trim());
+          data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes: horarioInfo.split('(')[0].trim() });
         }
-      });
+      }
       return data;
     });
 
     const detailedSchedule = interpretSchedule(schedule);
 
     await browser.close();
-
-    res.status(200).json({
-      dadosInstitucionais,
-      horarios: detailedSchedule,
-    });
-
+    res.status(200).json({ dadosInstitucionais, horarios: detailedSchedule });
   } catch (error) {
-    if (browser !== null) await browser.close();
+    if (browser) await browser.close();
     res.status(500).json({ error: error.message });
   }
 };
