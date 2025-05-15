@@ -1,7 +1,7 @@
 // /api/scraper.js
 const puppeteer = require('puppeteer');
-const { interpretSchedule } = require('../scheduleParser');
-const { delay } = require('../constants');
+const { interpretSchedule } = require('./scheduleParser');
+const { delay } = require('./constants');
 
 module.exports = async function handler(req, res) {
   try {
