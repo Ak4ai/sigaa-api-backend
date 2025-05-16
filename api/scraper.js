@@ -2,14 +2,22 @@ const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
-const pLimit = (await import('p-limit')).default;
 
-
+// Implementação simples de controle de concorrência
 async function processWithConcurrency(items, handler, maxConcurrency = 3) {
-    const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(maxConcurrency);
-    const promises = items.map(item => limit(() => handler(item)));
-    return Promise.all(promises);
+    const results = [];
+    let index = 0;
+
+    async function runNext() {
+        if (index >= items.length) return;
+        const currentIndex = index++;
+        results[currentIndex] = await handler(items[currentIndex]);
+        return runNext();
+    }
+
+    const workers = Array.from({ length: maxConcurrency }, () => runNext());
+    await Promise.all(workers);
+    return results;
 }
 
 module.exports = async function handler(req, res) {
@@ -18,7 +26,6 @@ module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Handle preflight OPTIONS request
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
@@ -27,7 +34,6 @@ module.exports = async function handler(req, res) {
     const isDev = process.env.NODE_ENV === 'development';
 
     try {
-        // Lê credenciais do corpo da requisição
         const { user, pass } = req.body;
 
         if (!user || !pass) {
@@ -37,23 +43,20 @@ module.exports = async function handler(req, res) {
         browser = await puppeteer.launch(
             isDev
                 ? {
-                        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                        headless: true,
-                        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                    }
+                      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+                      headless: true,
+                      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                  }
                 : {
-                        args: chromium.args,
-                        executablePath: await chromium.executablePath(),
-                        headless: chromium.headless,
-                    }
+                      args: chromium.args,
+                      executablePath: await chromium.executablePath(),
+                      headless: chromium.headless,
+                  }
         );
 
         const page = await browser.newPage();
-
-        // Viewport menor
         await page.setViewport({ width: 1024, height: 600 });
 
-        // Bloquear CSS, fontes e imagens
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const resourceType = req.resourceType();
