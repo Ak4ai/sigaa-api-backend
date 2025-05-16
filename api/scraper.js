@@ -104,7 +104,7 @@ module.exports = async function handler(req, res) {
 
         const disciplinasComAvisos = [];
 
-        for (const disciplina of schedule) {
+        for (const disciplina of schedule.slice(0, 2)) {
             try {
                 const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
                 const linkHandle = await page.evaluateHandle((xpath) => {
