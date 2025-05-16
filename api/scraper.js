@@ -230,16 +230,20 @@ module.exports = async function handler(req, res) {
 
                         // 2. Agora encontra e clica no botão Frequência normalmente
                         console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
-                        const freqBtnHandle = await page.evaluateHandle(() => {
-                            const menuLinks = Array.from(document.querySelectorAll('a'));
-                            return menuLinks.find(a =>
-                                a.querySelector('.itemMenu') &&
-                                a.querySelector('.itemMenu').innerText.trim().toLowerCase() === 'frequência'
-                            ) || null;
-                        });
-                        const freqBtnElement = freqBtnHandle.asElement();
 
-                        // ... Botão Frequência ...
+                        // Busca todos os .itemMenu e filtra pelo texto "Frequência"
+                        const freqDivs = await page.$$('.itemMenu');
+                        let freqBtnElement = null;
+                        for (const div of freqDivs) {
+                            const text = await div.evaluate(el => el.innerText.trim().toLowerCase());
+                            if (text === 'frequência') {
+                                // Sobe para o <a> pai
+                                const parent = await div.evaluateHandle(el => el.closest('a'));
+                                freqBtnElement = parent.asElement();
+                                break;
+                            }
+                        }
+
                         if (!freqBtnElement) {
                             console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
                             return { ...disciplina, avisos, frequencia: [], erro: 'Botão Frequência não encontrado' };
@@ -254,7 +258,6 @@ module.exports = async function handler(req, res) {
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
                         console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableExists);
-                        // (Opcional) await page.screenshot({ path: `frequencia_aberta_${disciplina.disciplina}.png` });
 
                         // 3. Coleta a tabela de frequência
                         console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
