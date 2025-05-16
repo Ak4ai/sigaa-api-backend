@@ -186,6 +186,7 @@ module.exports = async function handler(req, res) {
 
                         await page.waitForSelector('.menu-direita', { timeout: 7000 }); // Timeout reduzido
 
+                        // Coleta avisos
                         const avisos = await page.$$eval('.menu-direita > li', items => {
                             return items.map(li => ({
                                 data: li.querySelector('.data')?.innerText.trim(),
@@ -193,11 +194,31 @@ module.exports = async function handler(req, res) {
                             }));
                         });
 
-                        return { ...disciplina, avisos };
+                        // Clica no botão "Frequência"
+                        const freqBtnSelector = '#formMenu\\:j_id_jsp_311393315_94 > div.rich-panelbar-content-exterior > table > tbody > tr > td > a:nth-child(1)';
+                        await page.waitForSelector(freqBtnSelector, { timeout: 7000 });
+                        await Promise.all([
+                            page.click(freqBtnSelector),
+                            page.waitForSelector('#j_id_jsp_122142787_297 > fieldset > table > tbody tr', { timeout: 7000 })
+                        ]);
+
+                        // Coleta a tabela de frequência
+                        const frequencia = await page.$$eval(
+                            '#j_id_jsp_122142787_297 > fieldset > table > tbody tr',
+                            rows => rows.map(tr => {
+                                const tds = tr.querySelectorAll('td');
+                                return {
+                                    data: tds[0]?.innerText.trim(),
+                                    status: tds[1]?.innerText.trim()
+                                };
+                            })
+                        );
+
+                        return { ...disciplina, avisos, frequencia };
                     }
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
-                    return { ...disciplina, avisos: [], erro: e.message };
+                    return { ...disciplina, avisos: [], frequencia: [], erro: e.message };
                 }
             },
             poolSize,
