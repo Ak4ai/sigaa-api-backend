@@ -40,7 +40,20 @@ module.exports = async function handler(req, res) {
         );
 
         const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+
+        // Viewport menor
+        await page.setViewport({ width: 1024, height: 600 });
+
+        // Bloquear CSS, fontes e imagens
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (['stylesheet', 'font', 'image'].includes(resourceType)) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
 
         await page.goto('https://sig.cefetmg.br/sigaa/verTelaLogin.do', {
             waitUntil: 'domcontentloaded',
@@ -52,7 +65,7 @@ module.exports = async function handler(req, res) {
 
         await Promise.all([
             page.click('#conteudo input[type=submit]'),
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
         ]);
 
         await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
@@ -115,7 +128,7 @@ module.exports = async function handler(req, res) {
                 if (linkHandle) {
                     await Promise.all([
                         linkHandle.click(),
-                        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
+                        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
                     ]);
 
                     await page.waitForSelector('.menu-direita', { timeout: 10000 });
@@ -133,7 +146,7 @@ module.exports = async function handler(req, res) {
                     });
 
                     await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
-                        waitUntil: 'networkidle2',
+                        waitUntil: 'domcontentloaded',
                         timeout: 60000
                     });
                 }
