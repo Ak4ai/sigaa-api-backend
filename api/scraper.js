@@ -48,7 +48,16 @@ module.exports = async function handler(req, res) {
                       args: ['--no-sandbox', '--disable-setuid-sandbox'],
                   }
                 : {
-                      args: chromium.args,
+                      args: [
+                          '--no-sandbox',
+                          '--disable-setuid-sandbox',
+                          '--disable-dev-shm-usage',
+                          '--disable-gpu',
+                          '--single-process',
+                          '--disable-extensions',
+                          '--disable-infobars',
+                          '--window-size=1024,768'
+                      ],
                       executablePath: await chromium.executablePath(),
                       headless: chromium.headless,
                   }
