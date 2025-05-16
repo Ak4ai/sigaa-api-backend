@@ -174,7 +174,7 @@ module.exports = async function handler(req, res) {
             } finally {
                 await newPage.close();
             }
-        }, 3);
+        }, 5);
 
         await browser.close();
 
