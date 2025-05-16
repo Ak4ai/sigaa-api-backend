@@ -19,7 +19,8 @@
   "homepage": "https://github.com/Ak4ai/sigaa-api-backend#readme",
   "description": "",
   "dependencies": {
-  "@sparticuz/chromium": "^133.0.0",
-  "puppeteer-core":    "^24.8.2"
-}
+    "@sparticuz/chromium": "^133.0.0",
+    "p-limit": "^6.2.0",
+    "puppeteer-core": "^24.8.2"
+  }
 }
