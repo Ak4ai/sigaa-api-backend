@@ -105,14 +105,16 @@ module.exports = async function handler(req, res) {
         const disciplinasComAvisos = [];
 
         for (const disciplina of schedule) {
-            const formSelector = `form[id^="form_acessarTurmaVirtual"]:has(a:contains("${disciplina.disciplina}"))`;
+            try {
+                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
+                const linkHandle = await page.evaluateHandle((xpath) => {
+                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    return result.singleNodeValue;
+                }, xpath);
 
-            const formHandle = await page.$x(`//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`);
-
-            if (formHandle.length > 0) {
-                try {
+                if (linkHandle) {
                     await Promise.all([
-                        formHandle[0].click(),
+                        linkHandle.click(),
                         page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
                     ]);
 
@@ -134,9 +136,9 @@ module.exports = async function handler(req, res) {
                         waitUntil: 'networkidle2',
                         timeout: 60000
                     });
-                } catch (e) {
-                    console.warn(`Erro ao acessar a disciplina ${disciplina.disciplina}:`, e.message);
                 }
+            } catch (e) {
+                console.warn(`Erro ao acessar a disciplina ${disciplina.disciplina}:`, e.message);
             }
         }
 
