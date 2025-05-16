@@ -203,7 +203,7 @@ module.exports = async function handler(req, res) {
                         const painelContentSelector = 'div.rich-panelbar-content-exterior';
 
                         await page.waitForSelector(painelSelector, { timeout: 5000 });
-                        const painelContentVisible = await page.$eval(
+                        let painelContentVisible = await page.$eval(
                             painelContentSelector,
                             el => getComputedStyle(el).display !== 'none'
                         );
@@ -217,6 +217,13 @@ module.exports = async function handler(req, res) {
                                 { timeout: 3000 },
                                 painelContentSelector
                             );
+                            // Verifica novamente
+                            painelContentVisible = await page.$eval(
+                                painelContentSelector,
+                                el => getComputedStyle(el).display !== 'none'
+                            );
+                            console.log(`[${disciplina.disciplina}] Painel Alunos aberto?`, painelContentVisible);
+                            // (Opcional) await page.screenshot({ path: `alunos_aberto_${disciplina.disciplina}.png` });
                         } else {
                             console.log(`[${disciplina.disciplina}] Painel Alunos já está aberto.`);
                         }
@@ -232,6 +239,7 @@ module.exports = async function handler(req, res) {
                         });
                         const freqBtnElement = freqBtnHandle.asElement();
 
+                        // ... Botão Frequência ...
                         if (!freqBtnElement) {
                             console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
                             return { ...disciplina, avisos, frequencia: [], erro: 'Botão Frequência não encontrado' };
@@ -242,6 +250,11 @@ module.exports = async function handler(req, res) {
                             freqBtnElement.click(),
                             page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 })
                         ]);
+
+                        // Verifica se a tabela de frequência apareceu
+                        const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
+                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableExists);
+                        // (Opcional) await page.screenshot({ path: `frequencia_aberta_${disciplina.disciplina}.png` });
 
                         // 3. Coleta a tabela de frequência
                         console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
