@@ -196,16 +196,22 @@ module.exports = async function handler(req, res) {
 
                         // Clica no botão "Frequência" de forma robusta
                         console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
-                        const freqBtnHandle = await page.evaluateHandle(() => {
-                            // Procura todos os itens de menu
-                            const menuLinks = Array.from(document.querySelectorAll('a'));
-                            return menuLinks.find(a =>
-                                a.querySelector('.itemMenu') &&
-                                a.querySelector('.itemMenu').innerText.trim().toLowerCase() === 'frequência'
-                            ) || null;
-                        });
 
-                        const freqBtnElement = freqBtnHandle.asElement();
+                        // Busca o <a> cujo filho .itemMenu tem texto "Frequência"
+                        const freqBtnSelector = 'a > .itemMenu';
+                        const freqMenuLinks = await page.$$(freqBtnSelector);
+
+                        let freqBtnElement = null;
+                        for (const handle of freqMenuLinks) {
+                            const text = await handle.evaluate(el => el.innerText.trim().toLowerCase());
+                            if (text === 'frequência') {
+                                // Sobe para o <a>
+                                freqBtnElement = await handle.getProperty('parentElement');
+                                freqBtnElement = freqBtnElement.asElement();
+                                break;
+                            }
+                        }
+
                         if (!freqBtnElement) {
                             console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
                             return { ...disciplina, avisos, frequencia: [], erro: 'Botão Frequência não encontrado' };
