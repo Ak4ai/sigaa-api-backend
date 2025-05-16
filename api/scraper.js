@@ -133,14 +133,18 @@ module.exports = async function handler(req, res) {
             return data;
         });
 
+        console.time('total');
+
         const detailedSchedule = interpretSchedule(schedule);
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
         // Cria um pool de abas (pages) para os workers
-        const poolSize = Math.min(5, schedule.length);
+        const poolSize = Math.min(2, schedule.length); // Reduzido para no máximo 2 abas
+        console.time('openPages');
         const pages = await Promise.all(
             Array.from({ length: poolSize }, () => browser.newPage())
         );
+        console.timeEnd('openPages');
 
         // Configura cada aba do pool
         await Promise.all(pages.map(async (page) => {
@@ -154,9 +158,10 @@ module.exports = async function handler(req, res) {
                 }
             });
             await page.setViewport({ width: 1024, height: 600 });
+            await page.setUserAgent('Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36');
         }));
 
-        // Usa as abas do pool em paralelo, cada worker com sua aba
+        console.time('avisos');
         const disciplinasComAvisos = await processWithConcurrency(
             schedule,
             async (disciplina, workerIndex, { pages }) => {
@@ -164,7 +169,7 @@ module.exports = async function handler(req, res) {
                 try {
                     await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
                         waitUntil: 'domcontentloaded',
-                        timeout: 30000,
+                        timeout: 15000, // Timeout reduzido
                     });
 
                     const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
@@ -176,10 +181,10 @@ module.exports = async function handler(req, res) {
                     if (linkHandle) {
                         await Promise.all([
                             linkHandle.click(),
-                            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
+                            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }) // Timeout reduzido
                         ]);
 
-                        await page.waitForSelector('.menu-direita', { timeout: 10000 });
+                        await page.waitForSelector('.menu-direita', { timeout: 7000 }); // Timeout reduzido
 
                         const avisos = await page.$$eval('.menu-direita > li', items => {
                             return items.map(li => ({
@@ -198,10 +203,15 @@ module.exports = async function handler(req, res) {
             poolSize,
             { pages }
         );
+        console.timeEnd('avisos');
 
         // Fecha todas as abas do pool
+        console.time('closePages');
         await Promise.all(pages.map(p => p.close()));
+        console.timeEnd('closePages');
         await browser.close();
+
+        console.timeEnd('total');
 
         return res.status(200).json({
             dadosInstitucionais,
