@@ -194,17 +194,33 @@ module.exports = async function handler(req, res) {
                             }));
                         });
 
-                        // Clica no botão "Frequência"
-                        const freqBtnSelector = '#formMenu\\:j_id_jsp_311393315_94 > div.rich-panelbar-content-exterior > table > tbody > tr > td > a:nth-child(1)';
-                        await page.waitForSelector(freqBtnSelector, { timeout: 7000 });
+                        // Clica no botão "Frequência" de forma robusta
+                        console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
+                        const freqBtnHandle = await page.evaluateHandle(() => {
+                            // Procura todos os itens de menu
+                            const menuLinks = Array.from(document.querySelectorAll('a'));
+                            return menuLinks.find(a =>
+                                a.querySelector('.itemMenu') &&
+                                a.querySelector('.itemMenu').innerText.trim().toLowerCase() === 'frequência'
+                            ) || null;
+                        });
+
+                        const freqBtnElement = freqBtnHandle.asElement();
+                        if (!freqBtnElement) {
+                            console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
+                            return { ...disciplina, avisos, frequencia: [], erro: 'Botão Frequência não encontrado' };
+                        }
+
+                        console.log(`[${disciplina.disciplina}] Clicando no botão Frequência...`);
                         await Promise.all([
-                            page.click(freqBtnSelector),
-                            page.waitForSelector('#j_id_jsp_122142787_297 > fieldset > table > tbody tr', { timeout: 7000 })
+                            freqBtnElement.click(),
+                            page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 })
                         ]);
 
                         // Coleta a tabela de frequência
+                        console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
                         const frequencia = await page.$$eval(
-                            '#j_id_jsp_122142787_297 > fieldset > table > tbody tr',
+                            'fieldset > table > tbody tr',
                             rows => rows.map(tr => {
                                 const tds = tr.querySelectorAll('td');
                                 return {
@@ -213,6 +229,7 @@ module.exports = async function handler(req, res) {
                                 };
                             })
                         );
+                        console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
 
                         return { ...disciplina, avisos, frequencia };
                     }
