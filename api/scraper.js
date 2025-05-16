@@ -194,72 +194,24 @@ module.exports = async function handler(req, res) {
                             }));
                         });
 
-                        // Clica no botão "Frequência" de forma robusta
-                        console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
-
-                        // 1. Expande o painel "Alunos" se necessário
-                        console.log(`[${disciplina.disciplina}] Expandindo painel Alunos se necessário...`);
-                        const painelSelector = 'div.rich-panelbar-header.itemMenuHeaderAlunos';
-                        const painelContentSelector = 'div.rich-panelbar-content-exterior';
-
-                        await page.waitForSelector(painelSelector, { timeout: 5000 });
-                        let painelContentVisible = await page.$eval(
-                            painelContentSelector,
-                            el => getComputedStyle(el).display !== 'none'
-                        );
-
-                        if (!painelContentVisible) {
-                            console.log(`[${disciplina.disciplina}] Painel Alunos está fechado, clicando para abrir...`);
-                            await page.click(painelSelector);
-                            // Aguarda o painel abrir
-                            await page.waitForFunction(
-                                sel => getComputedStyle(document.querySelector(sel)).display !== 'none',
-                                { timeout: 3000 },
-                                painelContentSelector
+                        console.log(`[${disciplina.disciplina}] Abrindo aba de frequência via jsfcljs...`);
+                        await page.evaluate(() => {
+                            // Substitua o valor do parâmetro pelo valor correto do seu ambiente, se necessário
+                            jsfcljs(
+                                document.getElementById('formMenu'),
+                                {'formMenu:j_id_jsp_311393315_97':'formMenu:j_id_jsp_311393315_97'},
+                                ''
                             );
-                            // Verifica novamente
-                            painelContentVisible = await page.$eval(
-                                painelContentSelector,
-                                el => getComputedStyle(el).display !== 'none'
-                            );
-                            console.log(`[${disciplina.disciplina}] Painel Alunos aberto?`, painelContentVisible);
-                            // (Opcional) await page.screenshot({ path: `alunos_aberto_${disciplina.disciplina}.png` });
-                        } else {
-                            console.log(`[${disciplina.disciplina}] Painel Alunos já está aberto.`);
-                        }
+                        });
 
-                        // 2. Agora encontra e clica no botão Frequência normalmente
-                        console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
-
-                        // Busca todos os .itemMenu e filtra pelo texto "Frequência"
-                        const freqDivs = await page.$$('.itemMenu');
-                        let freqBtnElement = null;
-                        for (const div of freqDivs) {
-                            const text = await div.evaluate(el => el.innerText.trim().toLowerCase());
-                            if (text === 'frequência') {
-                                // Sobe para o <a> pai
-                                const parent = await div.evaluateHandle(el => el.closest('a'));
-                                freqBtnElement = parent.asElement();
-                                break;
-                            }
-                        }
-
-                        if (!freqBtnElement) {
-                            console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
-                            return { ...disciplina, avisos, frequencia: [], erro: 'Botão Frequência não encontrado' };
-                        }
-
-                        console.log(`[${disciplina.disciplina}] Clicando no botão Frequência...`);
-                        await Promise.all([
-                            freqBtnElement.click(),
-                            page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 })
-                        ]);
+                        // Aguarda a tabela de frequência aparecer
+                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 });
 
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
                         console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableExists);
 
-                        // 3. Coleta a tabela de frequência
+                        // Coleta a tabela de frequência
                         console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
                         const frequencia = await page.$$eval(
                             'fieldset > table > tbody tr',
