@@ -102,12 +102,51 @@ module.exports = async function handler(req, res) {
         const detailedSchedule = interpretSchedule(schedule);
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
+        const disciplinasComAvisos = [];
+
+        for (const disciplina of schedule) {
+            const formSelector = `form[id^="form_acessarTurmaVirtual"]:has(a:contains("${disciplina.disciplina}"))`;
+
+            const formHandle = await page.$x(`//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`);
+
+            if (formHandle.length > 0) {
+                try {
+                    await Promise.all([
+                        formHandle[0].click(),
+                        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
+                    ]);
+
+                    await page.waitForSelector('.menu-direita', { timeout: 10000 });
+
+                    const avisos = await page.$$eval('.menu-direita > li', items => {
+                        return items.map(li => ({
+                            data: li.querySelector('.data')?.innerText.trim(),
+                            descricao: li.querySelector('.descricao')?.innerText.trim()
+                        }));
+                    });
+
+                    disciplinasComAvisos.push({
+                        ...disciplina,
+                        avisos
+                    });
+
+                    await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
+                        waitUntil: 'networkidle2',
+                        timeout: 60000
+                    });
+                } catch (e) {
+                    console.warn(`Erro ao acessar a disciplina ${disciplina.disciplina}:`, e.message);
+                }
+            }
+        }
+
         await browser.close();
 
         return res.status(200).json({
             dadosInstitucionais,
             horariosDetalhados: detailedSchedule,
-            horariosSimplificados: simplifiedSchedule
+            horariosSimplificados: simplifiedSchedule,
+            avisosPorDisciplina: disciplinasComAvisos
         });
 
     } catch (error) {
