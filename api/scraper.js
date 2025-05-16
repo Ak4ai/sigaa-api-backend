@@ -3,6 +3,26 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 
+async function processWithConcurrency(items, handler, maxConcurrency = 3) {
+    const results = [];
+    const executing = [];
+
+    for (const item of items) {
+        const p = handler(item).then(result => {
+            results.push(result);
+        });
+        executing.push(p);
+
+        if (executing.length >= maxConcurrency) {
+            await Promise.race(executing);
+            executing.splice(executing.findIndex(e => e === p), 1);
+        }
+    }
+
+    await Promise.all(executing);
+    return results;
+}
+
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -115,12 +135,26 @@ module.exports = async function handler(req, res) {
         const detailedSchedule = interpretSchedule(schedule);
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
-        const disciplinasComAvisos = [];
-
-        for (const disciplina of schedule) {
+        const disciplinasComAvisos = await processWithConcurrency(schedule, async (disciplina) => {
+            const newPage = await browser.newPage();
             try {
+                await newPage.setRequestInterception(true);
+                newPage.on('request', (req) => {
+                    const type = req.resourceType();
+                    if (['stylesheet', 'font', 'image'].includes(type)) {
+                        req.abort();
+                    } else {
+                        req.continue();
+                    }
+                });
+
+                await newPage.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000,
+                });
+
                 const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
-                const linkHandle = await page.evaluateHandle((xpath) => {
+                const linkHandle = await newPage.evaluateHandle((xpath) => {
                     const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
                     return result.singleNodeValue;
                 }, xpath);
@@ -128,32 +162,27 @@ module.exports = async function handler(req, res) {
                 if (linkHandle) {
                     await Promise.all([
                         linkHandle.click(),
-                        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
+                        newPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
                     ]);
 
-                    await page.waitForSelector('.menu-direita', { timeout: 10000 });
+                    await newPage.waitForSelector('.menu-direita', { timeout: 10000 });
 
-                    const avisos = await page.$$eval('.menu-direita > li', items => {
+                    const avisos = await newPage.$$eval('.menu-direita > li', items => {
                         return items.map(li => ({
                             data: li.querySelector('.data')?.innerText.trim(),
                             descricao: li.querySelector('.descricao')?.innerText.trim()
                         }));
                     });
 
-                    disciplinasComAvisos.push({
-                        ...disciplina,
-                        avisos
-                    });
-
-                    await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
-                        waitUntil: 'domcontentloaded',
-                        timeout: 60000
-                    });
+                    return { ...disciplina, avisos };
                 }
             } catch (e) {
-                console.warn(`Erro ao acessar a disciplina ${disciplina.disciplina}:`, e.message);
+                console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
+                return { ...disciplina, avisos: [], erro: e.message };
+            } finally {
+                await newPage.close();
             }
-        }
+        }, 3);
 
         await browser.close();
 
