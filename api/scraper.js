@@ -3,19 +3,19 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 
-// Implementação simples de controle de concorrência
-async function processWithConcurrency(items, handler, maxConcurrency = 3) {
+// Refatorado: aceita workerIndex e extraArgs (ex: pages)
+async function processWithConcurrency(items, handler, maxConcurrency = 3, extraArgs = {}) {
     const results = [];
     let index = 0;
 
-    async function runNext() {
+    async function runNext(workerIndex) {
         if (index >= items.length) return;
         const currentIndex = index++;
-        results[currentIndex] = await handler(items[currentIndex]);
-        return runNext();
+        results[currentIndex] = await handler(items[currentIndex], workerIndex, extraArgs);
+        return runNext(workerIndex);
     }
 
-    const workers = Array.from({ length: maxConcurrency }, () => runNext());
+    const workers = Array.from({ length: maxConcurrency }, (_, i) => runNext(i));
     await Promise.all(workers);
     return results;
 }
@@ -136,55 +136,71 @@ module.exports = async function handler(req, res) {
         const detailedSchedule = interpretSchedule(schedule);
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
-        const disciplinasComAvisos = await processWithConcurrency(schedule, async (disciplina) => {
-            const newPage = await browser.newPage();
-            try {
-                await newPage.setRequestInterception(true);
-                newPage.on('request', (req) => {
-                    const type = req.resourceType();
-                    if (['stylesheet', 'font', 'image'].includes(type)) {
-                        req.abort();
-                    } else {
-                        req.continue();
-                    }
-                });
+        // Cria um pool de abas (pages) para os workers
+        const poolSize = Math.min(5, schedule.length);
+        const pages = await Promise.all(
+            Array.from({ length: poolSize }, () => browser.newPage())
+        );
 
-                await newPage.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000,
-                });
+        // Configura cada aba do pool
+        await Promise.all(pages.map(async (page) => {
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                const type = req.resourceType();
+                if (['stylesheet', 'font', 'image'].includes(type)) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+            await page.setViewport({ width: 1024, height: 600 });
+        }));
 
-                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
-                const linkHandle = await newPage.evaluateHandle((xpath) => {
-                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                    return result.singleNodeValue;
-                }, xpath);
-
-                if (linkHandle) {
-                    await Promise.all([
-                        linkHandle.click(),
-                        newPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
-                    ]);
-
-                    await newPage.waitForSelector('.menu-direita', { timeout: 10000 });
-
-                    const avisos = await newPage.$$eval('.menu-direita > li', items => {
-                        return items.map(li => ({
-                            data: li.querySelector('.data')?.innerText.trim(),
-                            descricao: li.querySelector('.descricao')?.innerText.trim()
-                        }));
+        // Usa as abas do pool em paralelo, cada worker com sua aba
+        const disciplinasComAvisos = await processWithConcurrency(
+            schedule,
+            async (disciplina, workerIndex, { pages }) => {
+                const page = pages[workerIndex];
+                try {
+                    await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000,
                     });
 
-                    return { ...disciplina, avisos };
-                }
-            } catch (e) {
-                console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
-                return { ...disciplina, avisos: [], erro: e.message };
-            } finally {
-                await newPage.close();
-            }
-        }, 5);
+                    const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
+                    const linkHandle = await page.evaluateHandle((xpath) => {
+                        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                        return result.singleNodeValue;
+                    }, xpath);
 
+                    if (linkHandle) {
+                        await Promise.all([
+                            linkHandle.click(),
+                            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
+                        ]);
+
+                        await page.waitForSelector('.menu-direita', { timeout: 10000 });
+
+                        const avisos = await page.$$eval('.menu-direita > li', items => {
+                            return items.map(li => ({
+                                data: li.querySelector('.data')?.innerText.trim(),
+                                descricao: li.querySelector('.descricao')?.innerText.trim()
+                            }));
+                        });
+
+                        return { ...disciplina, avisos };
+                    }
+                } catch (e) {
+                    console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
+                    return { ...disciplina, avisos: [], erro: e.message };
+                }
+            },
+            poolSize,
+            { pages }
+        );
+
+        // Fecha todas as abas do pool
+        await Promise.all(pages.map(p => p.close()));
         await browser.close();
 
         return res.status(200).json({
