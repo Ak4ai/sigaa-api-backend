@@ -2,10 +2,11 @@ const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
-const pLimit = require('p-limit');
+const pLimit = (await import('p-limit')).default;
 
 
 async function processWithConcurrency(items, handler, maxConcurrency = 3) {
+    const pLimit = (await import('p-limit')).default;
     const limit = pLimit(maxConcurrency);
     const promises = items.map(item => limit(() => handler(item)));
     return Promise.all(promises);
