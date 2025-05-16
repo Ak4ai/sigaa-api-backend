@@ -197,20 +197,40 @@ module.exports = async function handler(req, res) {
                         // Clica no botão "Frequência" de forma robusta
                         console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
 
-                        // Busca o <a> cujo filho .itemMenu tem texto "Frequência"
-                        const freqBtnSelector = 'a > .itemMenu';
-                        const freqMenuLinks = await page.$$(freqBtnSelector);
+                        // 1. Expande o painel "Alunos" se necessário
+                        console.log(`[${disciplina.disciplina}] Expandindo painel Alunos se necessário...`);
+                        const painelSelector = 'div.rich-panelbar-header.itemMenuHeaderAlunos';
+                        const painelContentSelector = 'div.rich-panelbar-content-exterior';
 
-                        let freqBtnElement = null;
-                        for (const handle of freqMenuLinks) {
-                            const text = await handle.evaluate(el => el.innerText.trim().toLowerCase());
-                            if (text === 'frequência') {
-                                // Sobe para o <a>
-                                freqBtnElement = await handle.getProperty('parentElement');
-                                freqBtnElement = freqBtnElement.asElement();
-                                break;
-                            }
+                        await page.waitForSelector(painelSelector, { timeout: 5000 });
+                        const painelContentVisible = await page.$eval(
+                            painelContentSelector,
+                            el => getComputedStyle(el).display !== 'none'
+                        );
+
+                        if (!painelContentVisible) {
+                            console.log(`[${disciplina.disciplina}] Painel Alunos está fechado, clicando para abrir...`);
+                            await page.click(painelSelector);
+                            // Aguarda o painel abrir
+                            await page.waitForFunction(
+                                sel => getComputedStyle(document.querySelector(sel)).display !== 'none',
+                                { timeout: 3000 },
+                                painelContentSelector
+                            );
+                        } else {
+                            console.log(`[${disciplina.disciplina}] Painel Alunos já está aberto.`);
                         }
+
+                        // 2. Agora encontra e clica no botão Frequência normalmente
+                        console.log(`[${disciplina.disciplina}] Procurando botão Frequência...`);
+                        const freqBtnHandle = await page.evaluateHandle(() => {
+                            const menuLinks = Array.from(document.querySelectorAll('a'));
+                            return menuLinks.find(a =>
+                                a.querySelector('.itemMenu') &&
+                                a.querySelector('.itemMenu').innerText.trim().toLowerCase() === 'frequência'
+                            ) || null;
+                        });
+                        const freqBtnElement = freqBtnHandle.asElement();
 
                         if (!freqBtnElement) {
                             console.warn(`[${disciplina.disciplina}] Botão Frequência não encontrado!`);
@@ -223,7 +243,7 @@ module.exports = async function handler(req, res) {
                             page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 })
                         ]);
 
-                        // Coleta a tabela de frequência
+                        // 3. Coleta a tabela de frequência
                         console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
                         const frequencia = await page.$$eval(
                             'fieldset > table > tbody tr',
