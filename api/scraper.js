@@ -2,6 +2,7 @@ const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
+const { validarTokenLogin } = require('./auth');
 
 // Refatorado: aceita workerIndex e extraArgs (ex: pages)
 async function processWithConcurrency(items, handler, maxConcurrency = 3, extraArgs = {}) {
@@ -30,16 +31,27 @@ module.exports = async function handler(req, res) {
         return res.status(200).end();
     }
 
+    let user, pass;
+    if (req.body.token) {
+        const payload = validarTokenLogin(req.body.token);
+        if (!payload) {
+            return res.status(401).json({ error: 'Token inválido ou expirado.' });
+        }
+        user = payload.user;
+        pass = payload.pass;
+    } else {
+        user = req.body.user;
+        pass = req.body.pass;
+    }
+
+    if (!user || !pass) {
+        return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
+    }
+
     let browser;
     const isDev = process.env.NODE_ENV === 'development';
 
     try {
-        const { user, pass } = req.body;
-
-        if (!user || !pass) {
-            throw new Error('Usuário e senha são obrigatórios.');
-        }
-
         browser = await puppeteer.launch(
             isDev
                 ? {
