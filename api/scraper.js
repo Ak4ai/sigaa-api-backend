@@ -250,7 +250,38 @@ module.exports = async function handler(req, res) {
                         });
                         console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
-                        return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia };
+                        // Abrir aba de notas via jsfcljs
+                        console.log(`[${disciplina.disciplina}] Abrindo aba de notas via jsfcljs...`);
+                        await page.evaluate(() => {
+                            jsfcljs(
+                                document.getElementById('formMenu'),
+                                {'formMenu:j_id_jsp_311393315_99':'formMenu:j_id_jsp_311393315_99'},
+                                ''
+                            );
+                        });
+
+                        // Aguarda a tabela de notas aparecer
+                        await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 7000 });
+
+                        // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
+                        const notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                            ths.map(th => th.innerText.trim()).filter(Boolean)
+                        );
+
+                        // Coleta as notas dos alunos (você pode filtrar pelo seu usuário se quiser)
+                        const notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                            rows.map(tr => {
+                                const tds = Array.from(tr.querySelectorAll('td'));
+                                return tds.map(td => td.innerText.trim());
+                            })
+                        );
+
+                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas });
+
+                        // Você pode filtrar pelo usuário logado, se necessário, usando o número de matrícula ou nome
+
+                        // Retorne junto com os outros dados:
+                        return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia, notas: { headers: notasHeaders, valores: notas } };
                     }
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
