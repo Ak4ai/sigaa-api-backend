@@ -1,11 +1,11 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-const SECRET = process.env.JWT_SECRET;
+const SECRET = process.env.SECRET;
 const ENC_SECRET = process.env.ENC_SECRET; // 32 caracteres para AES-256 (senha)
 const ENC_SECRET_USER = process.env.ENC_SECRET_USER; // 32 caracteres para AES-256 (usuário)
 
-if (!SECRET) throw new Error('JWT_SECRET não definida!');
+if (!SECRET) throw new Error('SECRET não definida!');
 if (!ENC_SECRET || ENC_SECRET.length !== 32) throw new Error('ENC_SECRET deve ter exatamente 32 caracteres!');
 if (!ENC_SECRET_USER || ENC_SECRET_USER.length !== 32) throw new Error('ENC_SECRET_USER deve ter exatamente 32 caracteres!');
 
