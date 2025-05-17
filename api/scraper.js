@@ -260,9 +260,22 @@ module.exports = async function handler(req, res) {
                             );
                         });
 
-                        // Aguarda a tabela de notas aparecer
+                        // Aguarda um tempo curto para a página reagir
+                        await page.waitForTimeout(1000);
+                        
+                        // Verifica se apareceu mensagem de erro (sem notas lançadas)
+                        const painelErro = await page.$eval('#painel-erros ul li', el => el.innerText).catch(() => null);
+                        
+                        if (painelErro) {
+                            console.log(`[${disciplina.disciplina}] Nenhuma nota lançada: ${painelErro}`);
+                            return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia, notas: { headers: [], valores: [], erro: painelErro } };
+                        }
+                        
+                        // Se não há erro, aguarda a tabela normalmente
                         await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 7000 });
-
+                        
+                        // ...segue normalmente coletando as notas...
+                        
                         // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
                         const notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                             ths.map(th => th.innerText.trim()).filter(Boolean)
