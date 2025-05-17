@@ -261,8 +261,8 @@ module.exports = async function handler(req, res) {
                         });
 
                         // Aguarda um tempo curto para a página reagir
-                        await page.waitForTimeout(1000);
-                        
+                        await delay(1000);           
+                                     
                         // Verifica se apareceu mensagem de erro (sem notas lançadas)
                         const painelErro = await page.$eval('#painel-erros ul li', el => el.innerText).catch(() => null);
                         
@@ -275,7 +275,7 @@ module.exports = async function handler(req, res) {
                         await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 7000 });
                         
                         // ...segue normalmente coletando as notas...
-                        
+
                         // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
                         const notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                             ths.map(th => th.innerText.trim()).filter(Boolean)
