@@ -196,7 +196,6 @@ module.exports = async function handler(req, res) {
 
                         console.log(`[${disciplina.disciplina}] Abrindo aba de frequência via jsfcljs...`);
                         await page.evaluate(() => {
-                            // Substitua o valor do parâmetro pelo valor correto do seu ambiente, se necessário
                             jsfcljs(
                                 document.getElementById('formMenu'),
                                 {'formMenu:j_id_jsp_311393315_97':'formMenu:j_id_jsp_311393315_97'},
@@ -225,7 +224,21 @@ module.exports = async function handler(req, res) {
                         );
                         console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
 
-                        return { ...disciplina, avisos, frequencia };
+                        // Coleta o número de aulas definidas pela CH do componente
+                        const numeroAulasDefinidas = await page.$eval('.botoes-show', el => {
+                            const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
+                            return match ? parseInt(match[1], 10) : null;
+                        });
+                        console.log(`[${disciplina.disciplina}] Número de aulas definidas:`, numeroAulasDefinidas);
+
+                        // (Opcional) Coleta a porcentagem de frequência
+                        const porcentagemFrequencia = await page.$eval('.botoes-show', el => {
+                            const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
+                            return match ? parseInt(match[1], 10) : null;
+                        });
+                        console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
+
+                        return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia };
                     }
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
