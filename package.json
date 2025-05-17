@@ -20,6 +20,7 @@
   "description": "",
   "dependencies": {
     "@sparticuz/chromium": "^133.0.0",
+    "jsonwebtoken": "^9.0.2",
     "p-limit": "^6.2.0",
     "puppeteer-core": "^24.8.2"
   }
