@@ -250,26 +250,34 @@ module.exports = async function handler(req, res) {
                         });
                         console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
-                        // Abrir aba de notas via jsfcljs
+                        // ...existing code...
+                        
+                        // Abrir aba de notas via jsfcljs (captura dinâmica do parâmetro)
                         console.log(`[${disciplina.disciplina}] Abrindo aba de notas via jsfcljs...`);
                         await page.evaluate(() => {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                {'formMenu:j_id_jsp_311393315_99':'formMenu:j_id_jsp_311393315_99'},
-                                ''
-                            );
+                            // Procura o link "Ver Notas" pelo texto do menu
+                            const links = Array.from(document.querySelectorAll('#formMenu a'));
+                            const notasLink = links.find(a => a.innerText.includes('Ver Notas'));
+                            if (notasLink && typeof jsfcljs === 'function') {
+                                // Extrai o parâmetro do onclick
+                                const onclick = notasLink.getAttribute('onclick');
+                                const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{('([^']+)':'\2')\}/);
+                                if (match && match[2]) {
+                                    const param = {};
+                                    param[match[2]] = match[2];
+                                    jsfcljs(document.getElementById('formMenu'), param, '');
+                                }
+                            }
                         });
-
+                        
                         // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
                         let notasHeaders = [];
                         let notas = [];
                         try {
                             await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                            // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
                             notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                                 ths.map(th => th.innerText.trim()).filter(Boolean)
                             );
-                            // Coleta as notas dos alunos
                             notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
                                 rows.map(tr => {
                                     const tds = Array.from(tr.querySelectorAll('td'));
@@ -280,6 +288,8 @@ module.exports = async function handler(req, res) {
                         } catch (e) {
                             console.log(`[${disciplina.disciplina}] Nenhuma nota lançada ou tabela não encontrada.`);
                         }
+                        
+                        // ...existing code...
 
                         // Retorne junto com os outros dados:
                         return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia, notas: { headers: notasHeaders, valores: notas } };
