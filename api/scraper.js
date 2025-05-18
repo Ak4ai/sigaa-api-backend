@@ -213,13 +213,12 @@ module.exports = async function handler(req, res) {
                         const frequenciaInfo = await page.evaluate(() => {
                             const a = Array.from(document.querySelectorAll('a')).find(a =>
                                 a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
-                                && a.offsetParent !== null // está visível
-                                && !a.hasAttribute('disabled') // não está desabilitado
                             );
                             if (!a) return null;
                             const onclick = a.getAttribute('onclick');
                             // Extrai o parâmetro dinâmico do jsfcljs
                             const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                            console.log('onclick:', onclick);
                             return match ? match[1] : null;
                         });
 
