@@ -217,7 +217,28 @@ module.exports = async function handler(req, res) {
 
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
 
-                    // Aguarda a tabela de frequência aparecer
+                    // Verifica se existe a mensagem "A frequência ainda não foi lançada."
+                    const frequenciaNaoLancada = await page.evaluate(() => {
+                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
+                            el.innerText.includes('A frequência ainda não foi lançada.')
+                        );
+                        return !!span;
+                    });
+
+                    if (frequenciaNaoLancada) {
+                        console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
+                        disciplinasComAvisos.push({
+                            ...disciplina,
+                            avisos,
+                            frequencia: [],
+                            numeroAulasDefinidas: null,
+                            porcentagemFrequencia: null,
+                            mensagem: 'A frequência ainda não foi lançada.'
+                        });
+                        continue; // pula para a próxima disciplina
+                    }
+
+                    // Aguarda a tabela de frequência aparecer normalmente
                     const freqTableAppeared = await page.waitForSelector('fieldset > table', { timeout: 7000 }).then(() => true).catch(() => false);
                     console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableAppeared);
 
