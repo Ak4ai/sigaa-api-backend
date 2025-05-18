@@ -260,38 +260,26 @@ module.exports = async function handler(req, res) {
                             );
                         });
 
-                        // Aguarda um tempo curto para a página reagir
-                        await delay(1000);           
-                                     
-                        // Verifica se apareceu mensagem de erro (sem notas lançadas)
-                        const painelErro = await page.$eval('#painel-erros ul li', el => el.innerText).catch(() => null);
-                        
-                        if (painelErro) {
-                            console.log(`[${disciplina.disciplina}] Nenhuma nota lançada: ${painelErro}`);
-                            return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia, notas: { headers: [], valores: [], erro: painelErro } };
+                        // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
+                        let notasHeaders = [];
+                        let notas = [];
+                        try {
+                            await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 3000 });
+                            // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
+                            notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                                ths.map(th => th.innerText.trim()).filter(Boolean)
+                            );
+                            // Coleta as notas dos alunos
+                            notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                                rows.map(tr => {
+                                    const tds = Array.from(tr.querySelectorAll('td'));
+                                    return tds.map(td => td.innerText.trim());
+                                })
+                            );
+                            console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas });
+                        } catch (e) {
+                            console.log(`[${disciplina.disciplina}] Nenhuma nota lançada ou tabela não encontrada.`);
                         }
-                        
-                        // Se não há erro, aguarda a tabela normalmente
-                        await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 7000 });
-                        
-                        // ...segue normalmente coletando as notas...
-
-                        // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
-                        const notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                            ths.map(th => th.innerText.trim()).filter(Boolean)
-                        );
-
-                        // Coleta as notas dos alunos (você pode filtrar pelo seu usuário se quiser)
-                        const notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                            rows.map(tr => {
-                                const tds = Array.from(tr.querySelectorAll('td'));
-                                return tds.map(td => td.innerText.trim());
-                            })
-                        );
-
-                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas });
-
-                        // Você pode filtrar pelo usuário logado, se necessário, usando o número de matrícula ou nome
 
                         // Retorne junto com os outros dados:
                         return { ...disciplina, avisos, frequencia, numeroAulasDefinidas, porcentagemFrequencia, notas: { headers: notasHeaders, valores: notas } };
