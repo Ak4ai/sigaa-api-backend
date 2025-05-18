@@ -217,6 +217,9 @@ module.exports = async function handler(req, res) {
 
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
 
+                    // Aguarde o DOM atualizar (aguarde o fieldset aparecer ou mudar)
+                    await page.waitForSelector('fieldset', { timeout: 7000 });
+
                     // Verifica se existe a mensagem "A frequência ainda não foi lançada."
                     const frequenciaNaoLancada = await page.evaluate(() => {
                         const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
