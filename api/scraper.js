@@ -151,7 +151,7 @@ module.exports = async function handler(req, res) {
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
         // Cria um pool de abas (pages) para os workers
-        const poolSize = Math.min(2, schedule.length); // Reduzido para no máximo 2 abas
+        const poolSize = Math.min(1, schedule.length); // Reduzido para no máximo 2 abas
         console.time('openPages');
         const pages = await Promise.all(
             Array.from({ length: poolSize }, () => browser.newPage())
