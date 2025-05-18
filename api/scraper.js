@@ -151,7 +151,7 @@ module.exports = async function handler(req, res) {
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
         // Cria um pool de abas (pages) para os workers
-        const poolSize = Math.min(3, schedule.length); // Reduzido para no máximo 2 abas
+        const poolSize = Math.min(1, schedule.length); // Reduzido para no máximo 2 abas
         console.time('openPages');
         const pages = await Promise.all(
             Array.from({ length: poolSize }, () => browser.newPage())
@@ -241,15 +241,20 @@ module.exports = async function handler(req, res) {
 
                         console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
 
-                        // Após chamar jsfcljs
-                        const oldContent = await page.content();
-                        await page.waitForFunction(
-                            old => document.body.innerHTML !== old,
-                            { timeout: 20000 },
-                            oldContent
-                        );
-                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 20000 });
-                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível após jsfcljs!`);
+                        // Aguarda por navegação ou mudança no DOM (o que acontecer primeiro)
+                        try {
+                            await Promise.race([
+                                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+                                page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 })
+                            ]);
+                            console.log(`[${disciplina.disciplina}] Mudança detectada após jsfcljs.`);
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Nenhuma mudança detectada após jsfcljs:`, e.message);
+                        }
+
+                        // Aguarda a tabela de frequência aparecer
+                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
 
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
