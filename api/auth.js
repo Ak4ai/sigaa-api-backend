@@ -25,7 +25,7 @@ function decrypt(text, key) {
     return decrypted;
 }
 
-function gerarTokenLogin(payload, expiresIn = '15m') {
+function gerarTokenLogin(payload, expiresIn = '7d') {
     // Criptografa usuário e senha antes de salvar no payload
     if (payload.user) {
         payload.user = encrypt(payload.user, ENC_SECRET_USER);
