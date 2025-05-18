@@ -253,12 +253,8 @@ module.exports = async function handler(req, res) {
                         }
 
                         // Aguarda a tabela de frequência aparecer
-                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 });
+                        await page.waitForSelector('fieldset > table', { timeout: 15000 });
                         console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
-
-                        // Verifica se a tabela de frequência apareceu
-                        const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
-                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableExists);
 
                         // Coleta a tabela de frequência
                         console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
