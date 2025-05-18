@@ -208,15 +208,38 @@ module.exports = async function handler(req, res) {
                             }));
                         });
 
-                        console.log(`[${disciplina.disciplina}] Abrindo aba de frequência via jsfcljs...`);
-                        await page.evaluate(() => {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                {'formMenu:j_id_jsp_311393315_97':'formMenu:j_id_jsp_311393315_97'},
-                                ''
+                        console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
+
+                        // Busca o elemento <a> do menu "Frequência" e extrai o parâmetro dinâmico do onclick
+                        const frequenciaInfo = await page.evaluate(() => {
+                            const a = Array.from(document.querySelectorAll('a')).find(a =>
+                                a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
                             );
+                            if (!a) return null;
+                            const onclick = a.getAttribute('onclick');
+                            // Extrai o parâmetro dinâmico do jsfcljs
+                            const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                            return match ? match[1] : null;
                         });
-                        console.log(`[${disciplina.disciplina}] jsfcljs chamado, aguardando mudança na página...`);
+
+                        if (!frequenciaInfo) {
+                            throw new Error("Não foi possível encontrar o código dinâmico do menu 'Frequência'.");
+                        }
+
+                        console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Frequência':`, frequenciaInfo);
+
+                        // Agora chama jsfcljs usando o código dinâmico encontrado
+                        await page.evaluate((codigo) => {
+                            if (typeof jsfcljs === 'function') {
+                                jsfcljs(
+                                    document.getElementById('formMenu'),
+                                    { [codigo]: codigo },
+                                    ''
+                                );
+                            }
+                        }, frequenciaInfo);
+
+                        console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
 
                         // Aguarda por navegação ou mudança no DOM (o que acontecer primeiro)
                         try {
@@ -231,6 +254,7 @@ module.exports = async function handler(req, res) {
 
                         // Aguarda a tabela de frequência aparecer
                         await page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
 
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
