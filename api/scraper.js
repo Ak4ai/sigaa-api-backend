@@ -183,6 +183,8 @@ module.exports = async function handler(req, res) {
                         }));
                     });
 
+                    await delay(500); // Pequeno delay para garantir atualização do menu
+
                     console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
 
                     let freqTableAppeared = false;
