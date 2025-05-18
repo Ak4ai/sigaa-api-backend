@@ -289,10 +289,12 @@ module.exports = async function handler(req, res) {
                             avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
                                 ths.map(th => {
                                     const id = th.id.replace('aval_', '');
-                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                                    const den = document.getElementById('denAval_' + id)?.value || '';
-                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
-                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                                    // Busca os inputs escondidos relativos ao tr#trAval
+                                    const tr = th.closest('tr');
+                                    const abrev = tr.querySelector(`#abrevAval_${id}`)?.value || '';
+                                    const den = tr.querySelector(`#denAval_${id}`)?.value || '';
+                                    const nota = tr.querySelector(`#notaAval_${id}`)?.value || '';
+                                    const peso = tr.querySelector(`#pesoAval_${id}`)?.value || '';
                                     return { abrev, den, nota, peso };
                                 })
                             );
