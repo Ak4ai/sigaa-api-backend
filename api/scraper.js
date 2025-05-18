@@ -217,18 +217,31 @@ module.exports = async function handler(req, res) {
 
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
 
-                    // Aguarda por navegação ou mudança no DOM (o que acontecer primeiro)
-                    try {
-                        await Promise.race([
-                            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-                            page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 })
-                        ]);
-                        console.log(`[${disciplina.disciplina}] Mudança detectada após jsfcljs.`);
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Nenhuma mudança detectada após jsfcljs:`, e.message);
+                    // Aguarda o fieldset aparecer (onde pode estar a mensagem ou a tabela)
+                    await page.waitForSelector('fieldset', { timeout: 7000 });
+
+                    // Verifica se existe a mensagem de frequência não lançada
+                    const frequenciaNaoLancada = await page.evaluate(() => {
+                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
+                            el.innerText.includes('A frequência ainda não foi lançada.')
+                        );
+                        return !!span;
+                    });
+
+                    if (frequenciaNaoLancada) {
+                        console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
+                        disciplinasComAvisos.push({
+                            ...disciplina,
+                            avisos,
+                            frequencia: [],
+                            numeroAulasDefinidas: null,
+                            porcentagemFrequencia: null,
+                            mensagem: 'A frequência ainda não foi lançada.'
+                        });
+                        return; // Pula para a próxima disciplina
                     }
 
-                    // Aguarda a tabela de frequência aparecer
+                    // Se não encontrou a mensagem, aguarda a tabela normalmente
                     await page.waitForSelector('fieldset > table', { timeout: 15000 });
                     console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
 
