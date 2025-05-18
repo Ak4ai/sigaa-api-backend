@@ -264,13 +264,71 @@ module.exports = async function handler(req, res) {
                         });
                         console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
+                        // ...existing code...
+
+                        // Abrir aba de notas via jsfcljs (captura dinâmica do parâmetro)
+                        console.log(`[${disciplina.disciplina}] Abrindo aba de notas via jsfcljs...`);
+                        await page.evaluate(() => {
+                            // Procura o link "Ver Notas" pelo texto do menu
+                            const links = Array.from(document.querySelectorAll('#formMenu a'));
+                            const notasLink = links.find(a => a.innerText.includes('Ver Notas'));
+                            if (notasLink && typeof jsfcljs === 'function') {
+                                // Extrai o parâmetro do onclick
+                                const onclick = notasLink.getAttribute('onclick');
+                                const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{('([^']+)':'\2')\}/);
+                                if (match && match[2]) {
+                                    const param = {};
+                                    param[match[2]] = match[2];
+                                    jsfcljs(document.getElementById('formMenu'), param, '');
+                                }
+                            }
+                        });
+                        
+                        // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
+                        let notasHeaders = [];
+                        let notas = [];
+                        let avaliacoes = [];
+                        try {
+                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                            notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                                ths.map(th => th.innerText.trim()).filter(Boolean)
+                            );
+                            notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                                rows.map(tr => {
+                                    const tds = Array.from(tr.querySelectorAll('td'));
+                                    return tds.map(td => td.innerText.trim());
+                                })
+                            );
+                            // Captura nota, peso e den dos inputs escondidos do tr#trAval
+                            avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                                ths.map(th => {
+                                    const id = th.id.replace('aval_', '');
+                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                                    const den = document.getElementById('denAval_' + id)?.value || '';
+                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
+                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                                    return { abrev, den, nota, peso };
+                                })
+                            );
+                            console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
+                        } catch (e) {
+                            console.log(`[${disciplina.disciplina}] Nenhuma nota lançada ou tabela não encontrada.`);
+                        }
+                        
+                        // ...existing code...
+                        
                         // Retorne junto com os outros dados:
                         return {
                             ...disciplina,
                             avisos,
                             frequencia,
                             numeroAulasDefinidas,
-                            porcentagemFrequencia
+                            porcentagemFrequencia,
+                            notas: {
+                                headers: notasHeaders,
+                                valores: notas,
+                                avaliacoes // <-- agora inclui os detalhes das avaliações
+                            }
                         };
                     }
                 } catch (e) {
