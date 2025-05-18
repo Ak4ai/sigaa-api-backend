@@ -238,7 +238,7 @@ module.exports = async function handler(req, res) {
                             porcentagemFrequencia: null,
                             mensagem: 'A frequência ainda não foi lançada.'
                         });
-                        return; // Pula para a próxima disciplina
+                        continue; // Pula para a próxima disciplina
                     }
 
                     // Se não encontrou a mensagem, aguarda a tabela normalmente
