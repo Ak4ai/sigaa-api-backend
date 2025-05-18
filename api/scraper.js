@@ -216,9 +216,21 @@ module.exports = async function handler(req, res) {
                                 ''
                             );
                         });
+                        console.log(`[${disciplina.disciplina}] jsfcljs chamado, aguardando mudança na página...`);
+
+                        // Aguarda por navegação ou mudança no DOM (o que acontecer primeiro)
+                        try {
+                            await Promise.race([
+                                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+                                page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 })
+                            ]);
+                            console.log(`[${disciplina.disciplina}] Mudança detectada após jsfcljs.`);
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Nenhuma mudança detectada após jsfcljs:`, e.message);
+                        }
 
                         // Aguarda a tabela de frequência aparecer
-                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 12000 });
+                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 15000 });
 
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
