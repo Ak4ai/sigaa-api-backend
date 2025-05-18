@@ -216,7 +216,7 @@ module.exports = async function handler(req, res) {
                         });
 
                         // Aguarda a tabela de frequência aparecer
-                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 7000 });
+                        await page.waitForSelector('fieldset > table > tbody tr', { timeout: 9000 });
 
                         // Verifica se a tabela de frequência apareceu
                         const freqTableExists = await page.$('fieldset > table > tbody tr') !== null;
@@ -255,9 +255,11 @@ module.exports = async function handler(req, res) {
                         // Abrir aba de notas via jsfcljs (captura dinâmica do parâmetro)
                         console.log(`[${disciplina.disciplina}] Abrindo aba de notas via jsfcljs...`);
                         await page.evaluate(() => {
+                            // Procura o link "Ver Notas" pelo texto do menu
                             const links = Array.from(document.querySelectorAll('#formMenu a'));
                             const notasLink = links.find(a => a.innerText.includes('Ver Notas'));
                             if (notasLink && typeof jsfcljs === 'function') {
+                                // Extrai o parâmetro do onclick
                                 const onclick = notasLink.getAttribute('onclick');
                                 const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{('([^']+)':'\2')\}/);
                                 if (match && match[2]) {
@@ -267,9 +269,6 @@ module.exports = async function handler(req, res) {
                                 }
                             }
                         });
-                        // Aguarda a tabela de notas sumir (caso já exista) e reaparecer (garante reload AJAX)
-                        await page.waitForSelector('table.tabelaRelatorio', { hidden: true, timeout: 2000 }).catch(() => {});
-                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 });
                         
                         // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
                         let notasHeaders = [];
@@ -287,18 +286,16 @@ module.exports = async function handler(req, res) {
                                 })
                             );
                             // Captura nota, peso e den dos inputs escondidos do tr#trAval
-                            avaliacoes = await page.$eval('table.tabelaRelatorio', table => {
-                                const tr = table.querySelector('thead tr#trAval');
-                                if (!tr) return [];
-                                return Array.from(tr.querySelectorAll('th[id^="aval_"]')).map(th => {
+                            avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                                ths.map(th => {
                                     const id = th.id.replace('aval_', '');
-                                    const abrev = tr.querySelector(`#abrevAval_${id}`)?.value || '';
-                                    const den = tr.querySelector(`#denAval_${id}`)?.value || '';
-                                    const nota = tr.querySelector(`#notaAval_${id}`)?.value || '';
-                                    const peso = tr.querySelector(`#pesoAval_${id}`)?.value || '';
+                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                                    const den = document.getElementById('denAval_' + id)?.value || '';
+                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
+                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
                                     return { abrev, den, nota, peso };
-                                });
-                            });
+                                })
+                            );
                             console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
                         } catch (e) {
                             console.log(`[${disciplina.disciplina}] Nenhuma nota lançada ou tabela não encontrada.`);
