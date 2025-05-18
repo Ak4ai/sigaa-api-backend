@@ -170,7 +170,6 @@ module.exports = async function handler(req, res) {
                 }
             });
             await page.setViewport({ width: 1024, height: 600 });
-            await page.setUserAgent('Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36');
         }));
 
         console.time('avisos');
@@ -214,6 +213,8 @@ module.exports = async function handler(req, res) {
                         const frequenciaInfo = await page.evaluate(() => {
                             const a = Array.from(document.querySelectorAll('a')).find(a =>
                                 a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
+                                && a.offsetParent !== null // está visível
+                                && !a.hasAttribute('disabled') // não está desabilitado
                             );
                             if (!a) return null;
                             const onclick = a.getAttribute('onclick');
