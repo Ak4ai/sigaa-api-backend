@@ -6,17 +6,16 @@ const { validarTokenLogin } = require('./auth');
 
 // Refatorado: aceita workerIndex e extraArgs (ex: pages)
 async function processWithConcurrency(items, handler, maxConcurrency = 3, extraArgs = {}) {
-    const results = [];
-    let index = 0;
+    const results = new Array(items.length);
 
-    async function runNext(workerIndex) {
-        if (index >= items.length) return;
-        const currentIndex = index++;
-        results[currentIndex] = await handler(items[currentIndex], workerIndex, extraArgs);
-        return runNext(workerIndex);
+    // Cada worker pega apenas os índices do seu grupo
+    async function runWorker(workerIndex) {
+        for (let i = workerIndex; i < items.length; i += maxConcurrency) {
+            results[i] = await handler(items[i], workerIndex, extraArgs);
+        }
     }
 
-    const workers = Array.from({ length: maxConcurrency }, (_, i) => runNext(i));
+    const workers = Array.from({ length: maxConcurrency }, (_, i) => runWorker(i));
     await Promise.all(workers);
     return results;
 }
