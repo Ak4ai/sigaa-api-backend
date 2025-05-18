@@ -264,7 +264,7 @@ module.exports = async function handler(req, res) {
                         let notasHeaders = [];
                         let notas = [];
                         try {
-                            await page.waitForSelector('table.tabelaRelatorio tbody tr', { timeout: 3000 });
+                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
                             // Coleta os cabeçalhos das avaliações (ex: Q1, P1, Nota, etc)
                             notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                                 ths.map(th => th.innerText.trim()).filter(Boolean)
