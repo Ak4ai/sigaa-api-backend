@@ -229,8 +229,19 @@ module.exports = async function handler(req, res) {
                     }
 
                     // Aguarda a tabela de frequência aparecer
-                    await page.waitForSelector('fieldset > table', { timeout: 15000 });
-                    console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
+                    const freqTableAppeared = await page.waitForSelector('fieldset > table', { timeout: 15000 }).then(() => true).catch(() => false);
+                    console.log(`[${disciplina.disciplina}] Tabela de frequência visível?`, freqTableAppeared);
+
+                    if (!freqTableAppeared) {
+                        // Procura e joga no console o elemento do menu "Frequência" (com id dinâmico)
+                        const freqMenuHtml = await page.evaluate(() => {
+                            const a = Array.from(document.querySelectorAll('a')).find(a =>
+                                a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
+                            );
+                            return a ? a.outerHTML : 'Elemento <a> do menu Frequência não encontrado';
+                        });
+                        console.warn(`[${disciplina.disciplina}] HTML do link Frequência:\n`, freqMenuHtml);
+                    }
 
                     // Coleta a tabela de frequência
                     console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
@@ -244,6 +255,7 @@ module.exports = async function handler(req, res) {
                             };
                         })
                     );
+                    
                     console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
 
                     // Coleta o número de aulas definidas pela CH do componente
