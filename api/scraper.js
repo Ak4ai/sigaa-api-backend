@@ -191,10 +191,12 @@ module.exports = async function handler(req, res) {
                     }, xpath);
 
                     if (linkHandle) {
+                        console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
                         await Promise.all([
                             linkHandle.click(),
                             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }) // Timeout reduzido
                         ]);
+                        console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
 
                         await page.waitForSelector('.menu-direita', { timeout: 7000 }); // Timeout reduzido
 
@@ -250,8 +252,6 @@ module.exports = async function handler(req, res) {
                         });
                         console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
-                        // ...existing code...
-                        
                         // Retorne junto com os outros dados:
                         return {
                             ...disciplina,
