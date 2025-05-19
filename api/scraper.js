@@ -175,9 +175,21 @@ module.exports = async function handler(req, res) {
         console.time('avisos');
         const disciplinasComAvisos = await processWithConcurrency(
             schedule,
-            async (disciplina, workerIndex, { pages }) => {
-                const page = pages[workerIndex];
+            async (disciplina, workerIndex, { browser }) => {
+                let page;
                 try {
+                    page = await browser.newPage();
+                    await page.setViewport({ width: 1024, height: 600 });
+                    await page.setRequestInterception(true);
+                    page.on('request', (req) => {
+                        const type = req.resourceType();
+                        if (['stylesheet', 'font', 'image'].includes(type)) {
+                            req.abort();
+                        } else {
+                            req.continue();
+                        }
+                    });
+
                     const maxTries = 2;
                     let tries = 0;
                     let entrou = false;
@@ -402,10 +414,10 @@ module.exports = async function handler(req, res) {
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
                     return { ...disciplina, avisos: [], frequencia: [], erro: e.message };
-                }
+                                }
             },
             poolSize,
-            { pages }
+            { browser }
         );
         console.timeEnd('avisos');
 
