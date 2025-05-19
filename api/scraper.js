@@ -151,64 +151,28 @@ module.exports = async function handler(req, res) {
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
         console.time('avisos');
-        const disciplinasComAvisos = await processWithConcurrency(
-            schedule,
-            async (disciplina, workerIndex, { browser }) => {
-                let page;
-                try {
-                    page = await browser.newPage();
-                    await page.setViewport({ width: 1024, height: 600 });
-                    await page.setRequestInterception(true);
-                    page.on('request', (req) => {
-                        const type = req.resourceType();
-                        if (['stylesheet', 'font', 'image'].includes(type)) {
-                            req.abort();
-                        } else {
-                            req.continue();
-                        }
-                    });
+        const disciplinasComAvisos = [];
+        for (const disciplina of schedule) {
+            try {
+                await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 15000,
+                });
 
-                    const maxTries = 2;
-                    let tries = 0;
-                    let entrou = false;
-                    while (tries < maxTries && !entrou) {
-                        tries++;
-                        // Sempre volte para a tela inicial do discente ANTES de processar cada disciplina
-                        await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
-                            waitUntil: 'domcontentloaded',
-                            timeout: 15000,
-                        });
+                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;                const linkHandle = await page.evaluateHandle((xpath) => {
+                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    return result.singleNodeValue;
+                }, xpath);
 
-                        const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;
-                        const linkHandle = await page.evaluateHandle((xpath) => {
-                            const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                            return result.singleNodeValue;
-                        }, xpath);
+                if (linkHandle) {
+                    console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
+                    await Promise.all([
+                        linkHandle.click(),
+                        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
+                    ]);
+                    console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
 
-                        if (linkHandle) {
-                            console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
-                            await Promise.all([
-                                linkHandle.click(),
-                                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
-                            ]);
-                            // Aguarda o seletor exclusivo da página da disciplina
-                            await page.waitForSelector('#linkNomeTurma', { timeout: 10000 });
-                            // Confirma que está na disciplina correta
-                            const nomeTurma = await page.$eval('#linkNomeTurma', el => el.innerText.trim());
-                            if (nomeTurma === disciplina.disciplina) {
-                                entrou = true;
-                                console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
-                            } else {
-                                console.warn(`[${disciplina.disciplina}] Página carregada não corresponde à disciplina esperada (encontrado: ${nomeTurma}). Tentando novamente...`);
-                                await delay(500); // Pequeno delay antes de tentar de novo
-                            }
-                        } else {
-                            throw new Error(`Não foi possível encontrar o link da disciplina: ${disciplina.disciplina}`);
-                        }
-                    }
-                    if (!entrou) {
-                        throw new Error(`Página carregada não corresponde à disciplina esperada: ${disciplina.disciplina}`);
-                    }
+                    await page.waitForSelector('.menu-direita', { timeout: 7000 });
 
                     // Coleta avisos
                     const avisos = await page.$$eval('.menu-direita > li', items => {
@@ -265,14 +229,15 @@ module.exports = async function handler(req, res) {
 
                     if (frequenciaNaoLancada) {
                         console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
-                        return {
+                        disciplinasComAvisos.push({
                             ...disciplina,
                             avisos,
                             frequencia: [],
                             numeroAulasDefinidas: null,
                             porcentagemFrequencia: null,
                             mensagem: 'A frequência ainda não foi lançada.'
-                        };
+                        });
+                        continue; // Pula para a próxima disciplina
                     }
 
                     // Se não encontrou a mensagem, aguarda a tabela normalmente
@@ -318,14 +283,15 @@ module.exports = async function handler(req, res) {
                         const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
                         return match ? match[1] : null;
                     });
-
+                    
                     if (!notasInfo) {
                         throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
                     }
-
+                    
                     console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
-
+                    
                     // Agora chama jsfcljs usando o código dinâmico encontrado
+                    
                     await page.evaluate((codigo) => {
                         console.log('Chamando jsfcljs com código dinâmico para Notas:', codigo);
                         if (typeof jsfcljs === 'function') {
@@ -336,7 +302,8 @@ module.exports = async function handler(req, res) {
                             );
                         }
                     }, notasInfo);
-
+                    
+                    
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
                     // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
                     let notasHeaders = [];
@@ -376,8 +343,8 @@ module.exports = async function handler(req, res) {
                         console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
                     }
 
-                    // Retorne o resultado para este worker
-                    return {
+                    // Adicione o resultado ao array
+                    disciplinasComAvisos.push({
                         ...disciplina,
                         avisos,
                         frequencia,
@@ -388,17 +355,13 @@ module.exports = async function handler(req, res) {
                             valores: notas,
                             avaliacoes // Inclui os detalhes das avaliações
                         }
-                    };
-                } catch (e) {
-                    console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
-                    return { ...disciplina, avisos: [], frequencia: [], erro: e.message };
-                } finally {
-                    if (page) await page.close();
+                    });
                 }
-            },
-            Math.min(2, schedule.length), // poolSize
-            { browser }
-        );
+            } catch (e) {
+                console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
+                disciplinasComAvisos.push({ ...disciplina, avisos: [], frequencia: [], erro: e.message });
+            }
+        }
         console.timeEnd('avisos');
 
         await browser.close();
