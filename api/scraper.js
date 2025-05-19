@@ -305,37 +305,37 @@ module.exports = async function handler(req, res) {
 
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
 
-                    // Verifica se aparece a mensagem "Ainda não foram lançadas notas."
                     let notasNaoLancadas = false;
                     try {
-                        await page.waitForFunction(() => {
-                            const li = document.evaluate(
-                                "/html/body/div[1]/div[7]/div/div/ul/li",
-                                document,
-                                null,
-                                XPathResult.FIRST_ORDERED_NODE_TYPE,
-                                null
-                            ).singleNodeValue;
-                            return li && li.innerText.includes("Ainda não foram lançadas notas.");
-                        }, { timeout: 2000 });
-                        notasNaoLancadas = true;
-                        console.log(`[${disciplina.disciplina}] Ainda não foram lançadas notas.`);
+                        // Espera o que aparecer primeiro: a mensagem ou a tabela
+                        await Promise.race([
+                            page.waitForFunction(() => {
+                                const li = document.evaluate(
+                                    "/html/body/div[1]/div[7]/div/div/ul/li",
+                                    document,
+                                    null,
+                                    XPathResult.FIRST_ORDERED_NODE_TYPE,
+                                    null
+                                ).singleNodeValue;
+                                return li && li.innerText.includes("Ainda não foram lançadas notas.");
+                            }, { timeout: 3000 }).then(() => {
+                                notasNaoLancadas = true;
+                                console.log(`[${disciplina.disciplina}] Mensagem de notas não lançadas encontrada.`);
+                            }),
+                            page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 }).then(() => {
+                                console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                            })
+                        ]);
                     } catch (e) {
-                        // Não achou a mensagem, segue normalmente
+                        // Nenhum dos dois apareceu no tempo limite
+                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de notas apareceram no tempo limite.`);
                     }
 
                     let notasHeaders = [];
                     let notas = [];
                     let avaliacoes = [];
                     if (!notasNaoLancadas) {
-                        try {
-                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                            console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                        } catch (e) {
-                            console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
-                        }
-
-                        // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
+                        // Extrai os dados da tabela normalmente
                         try {
                             notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                                 ths.map(th => th.innerText.trim()).filter(Boolean)
@@ -361,7 +361,7 @@ module.exports = async function handler(req, res) {
                             console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
                         }
                     } else {
-                        // Opcional: pode adicionar uma mensagem específica no objeto de notas
+                        // Não há notas lançadas
                         notasHeaders = [];
                         notas = [];
                         avaliacoes = [];
