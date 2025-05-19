@@ -414,17 +414,14 @@ module.exports = async function handler(req, res) {
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
                     return { ...disciplina, avisos: [], frequencia: [], erro: e.message };
-                                }
+                } finally {
+                    if (page) await page.close();
+                }
             },
             poolSize,
             { browser }
         );
         console.timeEnd('avisos');
-
-        // Fecha todas as abas do pool
-        console.time('closePages');
-        await Promise.all(pages.map(p => p.close()));
-        console.timeEnd('closePages');
 
         await browser.close();
 
