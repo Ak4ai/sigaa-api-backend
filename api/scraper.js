@@ -286,10 +286,7 @@ module.exports = async function handler(req, res) {
                     console.log(`[${disciplina.disciplina}] Tentando acessar a página de 'Notas'...`);
 
                     // Incrementa o identificador dinâmico do menu "Frequência" para acessar "Notas"
-                    const notasInfo = frequenciaInfo.replace(/(\d+)(_.*)/, (match, num, suffix) => {
-                        const baseNumber = parseInt(num, 10);
-                        return `${baseNumber + 2}${suffix}`;
-                    });
+                    const notasInfo = frequenciaInfo.replace(/_(\d+)$/, (match, num) => `_${parseInt(num, 10) + 2}`);
                     
                     console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
                     
@@ -304,8 +301,7 @@ module.exports = async function handler(req, res) {
                         }
                     }, notasInfo);
                     
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-                    // Aguarda o carregamento da página de notas
+                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);                    // Aguarda o carregamento da página de notas
                     await page.waitForSelector('fieldset', { timeout: 7000 });
 
                     // Coleta o HTML da página de notas para depuração
