@@ -184,10 +184,11 @@ module.exports = async function handler(req, res) {
                         timeout: 15000,
                     });
 
-                    // Aguarda o link da disciplina aparecer
                     const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;
-                    await page.waitForXPath(xpath, { timeout: 10000 });
-                    const [linkHandle] = await page.$x(xpath);
+                    const linkHandle = await page.evaluateHandle((xpath) => {
+                        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                        return result.singleNodeValue;
+                    }, xpath);
 
                     if (linkHandle) {
                         console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
