@@ -302,45 +302,69 @@ module.exports = async function handler(req, res) {
                             );
                         }
                     }, notasInfo);
-                    
-                    
+
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-                    // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
+
+                    // Verifica se aparece a mensagem "Ainda não foram lançadas notas."
+                    let notasNaoLancadas = false;
+                    try {
+                        await page.waitForFunction(() => {
+                            const li = document.evaluate(
+                                "/html/body/div[1]/div[7]/div/div/ul/li",
+                                document,
+                                null,
+                                XPathResult.FIRST_ORDERED_NODE_TYPE,
+                                null
+                            ).singleNodeValue;
+                            return li && li.innerText.includes("Ainda não foram lançadas notas.");
+                        }, { timeout: 2000 });
+                        notasNaoLancadas = true;
+                        console.log(`[${disciplina.disciplina}] Ainda não foram lançadas notas.`);
+                    } catch (e) {
+                        // Não achou a mensagem, segue normalmente
+                    }
+
                     let notasHeaders = [];
                     let notas = [];
                     let avaliacoes = [];
-                    try {
-                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                        console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
-                    }
+                    if (!notasNaoLancadas) {
+                        try {
+                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                            console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                        }
 
-                    // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
-                    try {
-                        notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                            ths.map(th => th.innerText.trim()).filter(Boolean)
-                        );
-                        notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                            rows.map(tr => {
-                                const tds = Array.from(tr.querySelectorAll('td'));
-                                return tds.map(td => td.innerText.trim());
-                            })
-                        );
-                        // Captura nota, peso e den dos inputs escondidos do tr#trAval
-                        avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
-                            ths.map(th => {
-                                const id = th.id.replace('aval_', '');
-                                const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                                const den = document.getElementById('denAval_' + id)?.value || '';
-                                const nota = document.getElementById('notaAval_' + id)?.value || '';
-                                const peso = document.getElementById('pesoAval_' + id)?.value || '';
-                                return { abrev, den, nota, peso };
-                            })
-                        );
-                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
+                        // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
+                        try {
+                            notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                                ths.map(th => th.innerText.trim()).filter(Boolean)
+                            );
+                            notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                                rows.map(tr => {
+                                    const tds = Array.from(tr.querySelectorAll('td'));
+                                    return tds.map(td => td.innerText.trim());
+                                })
+                            );
+                            avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                                ths.map(th => {
+                                    const id = th.id.replace('aval_', '');
+                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                                    const den = document.getElementById('denAval_' + id)?.value || '';
+                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
+                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                                    return { abrev, den, nota, peso };
+                                })
+                            );
+                            console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
+                        }
+                    } else {
+                        // Opcional: pode adicionar uma mensagem específica no objeto de notas
+                        notasHeaders = [];
+                        notas = [];
+                        avaliacoes = [];
                     }
 
                     // Adicione o resultado ao array
