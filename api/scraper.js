@@ -195,6 +195,13 @@ module.exports = async function handler(req, res) {
                             linkHandle.click(),
                             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
                         ]);
+                        // Aguarda o seletor exclusivo da página da disciplina
+                        await page.waitForSelector('#linkNomeTurma', { timeout: 10000 });
+                        // Confirma que está na disciplina correta
+                        const nomeTurma = await page.$eval('#linkNomeTurma', el => el.innerText.trim());
+                        if (nomeTurma !== disciplina.disciplina) {
+                            throw new Error(`Página carregada não corresponde à disciplina esperada: ${disciplina.disciplina} (encontrado: ${nomeTurma})`);
+                        }
                         console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
 
                         // Coleta avisos
