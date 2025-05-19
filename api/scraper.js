@@ -178,16 +178,16 @@ module.exports = async function handler(req, res) {
             async (disciplina, workerIndex, { pages }) => {
                 const page = pages[workerIndex];
                 try {
+                    // Sempre volte para a tela inicial do discente ANTES de processar cada disciplina
                     await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
                         waitUntil: 'domcontentloaded',
                         timeout: 15000,
                     });
 
+                    // Aguarda o link da disciplina aparecer
                     const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;
-                    const linkHandle = await page.evaluateHandle((xpath) => {
-                        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                        return result.singleNodeValue;
-                    }, xpath);
+                    await page.waitForXPath(xpath, { timeout: 10000 });
+                    const [linkHandle] = await page.$x(xpath);
 
                     if (linkHandle) {
                         console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
