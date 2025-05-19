@@ -273,24 +273,36 @@ module.exports = async function handler(req, res) {
                     });
                     console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
-                    // Abrir aba de notas via jsfcljs (captura dinâmica do parâmetro)
-                    console.log(`[${disciplina.disciplina}] Abrindo aba de notas via jsfcljs...`);
-                    await page.evaluate(() => {
-                        // Procura o link "Ver Notas" pelo texto do menu
-                        const links = Array.from(document.querySelectorAll('#formMenu a'));
-                        const notasLink = links.find(a => a.innerText.includes('Ver Notas'));
-                        if (notasLink && typeof jsfcljs === 'function') {
-                            // Extrai o parâmetro do onclick
-                            const onclick = notasLink.getAttribute('onclick');
-                            const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{('([^']+)':'\2')\}/);
-                            if (match && match[2]) {
-                                const param = {};
-                                param[match[2]] = match[2];
-                                jsfcljs(document.getElementById('formMenu'), param, '');
-                            }
-                        }
+                    // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
+                    const notasInfo = await page.evaluate(() => {
+                        const a = Array.from(document.querySelectorAll('a')).find(a =>
+                            a.querySelector('.itemMenu')?.innerText.trim() === 'Ver Notas'
+                        );
+                        if (!a) return null;
+                        const onclick = a.getAttribute('onclick');
+                        // Extrai o parâmetro dinâmico do jsfcljs
+                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                        return match ? match[1] : null;
                     });
-
+                    
+                    if (!notasInfo) {
+                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
+                    }
+                    
+                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
+                    
+                    // Agora chama jsfcljs usando o código dinâmico encontrado
+                    await page.evaluate((codigo) => {
+                        if (typeof jsfcljs === 'function') {
+                            jsfcljs(
+                                document.getElementById('formMenu'),
+                                { [codigo]: codigo },
+                                ''
+                            );
+                        }
+                    }, notasInfo);
+                    
+                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
                     // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
                     let notasHeaders = [];
                     let notas = [];
