@@ -159,8 +159,7 @@ module.exports = async function handler(req, res) {
                     timeout: 15000,
                 });
 
-                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[contains(text(),"${disciplina.disciplina}")]`;
-                const linkHandle = await page.evaluateHandle((xpath) => {
+                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;                const linkHandle = await page.evaluateHandle((xpath) => {
                     const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
                     return result.singleNodeValue;
                 }, xpath);
