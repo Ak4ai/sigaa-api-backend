@@ -292,7 +292,9 @@ module.exports = async function handler(req, res) {
                     console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
                     
                     // Agora chama jsfcljs usando o código dinâmico encontrado
+                    
                     await page.evaluate((codigo) => {
+                        console.log('Chamando jsfcljs com código dinâmico para Notas:', codigo);
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
                                 document.getElementById('formMenu'),
@@ -301,6 +303,7 @@ module.exports = async function handler(req, res) {
                             );
                         }
                     }, notasInfo);
+                    
                     
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
                     // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
