@@ -282,15 +282,31 @@ module.exports = async function handler(req, res) {
                         porcentagemFrequencia
                     });
 
+                                        // ...existing code...
+                    
                     // Após coletar frequência, acessar a página de "Notas"
-                    console.log(`[${disciplina.disciplina}] Tentando acessar a página de 'Notas'...`);
-
-                    // Incrementa o identificador dinâmico do menu "Frequência" para acessar "Notas"
-                    const notasInfo = frequenciaInfo.replace(/_(\d+)$/, (match, num) => `_${parseInt(num, 10) + 2}`);
+                    console.log(`[${disciplina.disciplina}] Procurando link 'Ver Notas' no menu...`);
                     
-                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
+                    // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
+                    const notasInfo = await page.evaluate(() => {
+                        const a = Array.from(document.querySelectorAll('a')).find(a =>
+                            a.querySelector('.itemMenu')?.innerText.trim() === 'Ver Notas'
+                        );
+                        if (!a) return null;
+                        const onclick = a.getAttribute('onclick');
+                        // Extrai o parâmetro dinâmico do jsfcljs
+                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                        console.log('onclick:', onclick);
+                        return match ? match[1] : null;
+                    });
                     
-                    // Agora chama jsfcljs usando o código dinâmico encontrado para "Notas"
+                    if (!notasInfo) {
+                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
+                    }
+                    
+                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Ver Notas':`, notasInfo);
+                    
+                    // Agora chama jsfcljs usando o código dinâmico encontrado
                     await page.evaluate((codigo) => {
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
@@ -301,15 +317,16 @@ module.exports = async function handler(req, res) {
                         }
                     }, notasInfo);
                     
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);                    // Aguarda o carregamento da página de notas
+                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Ver Notas', aguardando mudança na página...`);
+                    
+                    // Aguarda o carregamento da página de notas
                     await page.waitForSelector('fieldset', { timeout: 7000 });
-
+                    
                     // Coleta o HTML da página de notas para depuração
                     const notasHtml = await page.evaluate(() => document.documentElement.outerHTML);
                     console.log(`[${disciplina.disciplina}] HTML da página de notas:`, notasHtml);
-
-                    // TODO: Adicionar lógica para extrair e retornar as notas, se necessário
-
+                    
+                    // ...existing code...
                 }
             } catch (e) {
                 console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
