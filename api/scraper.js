@@ -281,6 +281,37 @@ module.exports = async function handler(req, res) {
                         numeroAulasDefinidas,
                         porcentagemFrequencia
                     });
+
+                    // Após coletar frequência, acessar a página de "Notas"
+                    console.log(`[${disciplina.disciplina}] Tentando acessar a página de 'Notas'...`);
+
+                    // Incrementa o identificador dinâmico do menu "Frequência" para acessar "Notas"
+                    const notasInfo = frequenciaInfo.replace(/\d+/, (match) => parseInt(match, 10) + 2);
+
+                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
+
+                    // Agora chama jsfcljs usando o código dinâmico encontrado para "Notas"
+                    await page.evaluate((codigo) => {
+                        if (typeof jsfcljs === 'function') {
+                            jsfcljs(
+                                document.getElementById('formMenu'),
+                                { [codigo]: codigo },
+                                ''
+                            );
+                        }
+                    }, notasInfo);
+
+                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
+
+                    // Aguarda o carregamento da página de notas
+                    await page.waitForSelector('fieldset', { timeout: 7000 });
+
+                    // Coleta o HTML da página de notas para depuração
+                    const notasHtml = await page.evaluate(() => document.documentElement.outerHTML);
+                    console.log(`[${disciplina.disciplina}] HTML da página de notas:`, notasHtml);
+
+                    // TODO: Adicionar lógica para extrair e retornar as notas, se necessário
+
                 }
             } catch (e) {
                 console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
