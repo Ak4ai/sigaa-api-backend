@@ -150,28 +150,6 @@ module.exports = async function handler(req, res) {
         const detailedSchedule = interpretSchedule(schedule);
         const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
-        // Cria um pool de abas (pages) para os workers
-        const poolSize = Math.min(2, schedule.length); // Até 2 abas
-        console.time('openPages');
-        const pages = await Promise.all(
-            Array.from({ length: poolSize }, () => browser.newPage())
-        );
-        console.timeEnd('openPages');
-
-        // Configura cada aba do pool
-        await Promise.all(pages.map(async (page) => {
-            await page.setRequestInterception(true);
-            page.on('request', (req) => {
-                const type = req.resourceType();
-                if (['stylesheet', 'font', 'image'].includes(type)) {
-                    req.abort();
-                } else {
-                    req.continue();
-                }
-            });
-            await page.setViewport({ width: 1024, height: 600 });
-        }));
-
         console.time('avisos');
         const disciplinasComAvisos = await processWithConcurrency(
             schedule,
@@ -418,7 +396,7 @@ module.exports = async function handler(req, res) {
                     if (page) await page.close();
                 }
             },
-            poolSize,
+            Math.min(2, schedule.length), // poolSize
             { browser }
         );
         console.timeEnd('avisos');
