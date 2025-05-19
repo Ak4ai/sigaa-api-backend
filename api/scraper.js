@@ -306,12 +306,19 @@ module.exports = async function handler(req, res) {
                     
                     
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-                    // Aguarda a tabela de notas aparecer, mas não trava se não aparecer
+                    // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
                     let notasHeaders = [];
                     let notas = [];
                     let avaliacoes = [];
                     try {
                         await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                    } catch (e) {
+                        console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                    }
+
+                    // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
+                    try {
                         notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                             ths.map(th => th.innerText.trim()).filter(Boolean)
                         );
@@ -334,7 +341,7 @@ module.exports = async function handler(req, res) {
                         );
                         console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
                     } catch (e) {
-                        console.log(`[${disciplina.disciplina}] Nenhuma nota lançada ou tabela não encontrada.`);
+                        console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
                     }
 
                     // Adicione o resultado ao array
