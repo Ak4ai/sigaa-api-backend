@@ -38,53 +38,21 @@ module.exports = async function handler(req, res) {
     try {
         cluster = await Cluster.launch({
             concurrency: Cluster.CONCURRENCY_CONTEXT,
-            maxConcurrency: 2, // Ajuste conforme recursos do servidor
-            puppeteerOptions: isDev
-                ? {
-                      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                      headless: true,
-                      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                  }
-                : {
-                      args: [
-                          '--no-sandbox',
-                          '--disable-setuid-sandbox',
-                          '--disable-dev-shm-usage',
-                          '--disable-gpu',
-                          '--single-process',
-                          '--disable-extensions',
-                          '--disable-infobars',
-                          '--window-size=1024,768'
-                      ],
-                      executablePath: await chromium.executablePath(),
-                      headless: chromium.headless,
-                  }
+            maxConcurrency: 2,
+            puppeteerOptions: {
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                args: chromium.args,
+            }
         });
 
         // Login e coleta de dados institucionais e schedule (apenas uma vez)
         const { dadosInstitucionais, schedule, detailedSchedule, simplifiedSchedule } = await (async () => {
-            const browser = await puppeteer.launch(
-                isDev
-                    ? {
-                          executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                          headless: true,
-                          args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                      }
-                    : {
-                          args: [
-                              '--no-sandbox',
-                              '--disable-setuid-sandbox',
-                              '--disable-dev-shm-usage',
-                              '--disable-gpu',
-                              '--single-process',
-                              '--disable-extensions',
-                              '--disable-infobars',
-                              '--window-size=1024,768'
-                          ],
-                          executablePath: await chromium.executablePath(),
-                          headless: chromium.headless,
-                      }
-            );
+            const browser = await puppeteer.launch({
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                args: chromium.args,
+            });
             const page = await browser.newPage();
             await page.setViewport({ width: 1024, height: 600 });
             await page.setRequestInterception(true);
