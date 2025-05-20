@@ -3,6 +3,20 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
+
+const { Sema } = require('async-sema');
+const sema = new Sema(2); // Limite de 2 tarefas
+
+await Promise.all(schedule.map(async disciplina => {
+    await sema.acquire();
+    try {
+        // ...processa a disciplina...
+    } finally {
+        sema.release();
+    }
+}));
+
+
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -347,21 +361,6 @@ module.exports = async function handler(req, res) {
             }
         }
         console.timeEnd('avisos');
-
-        // Teste simples do p-queue
-        const queue = new PQueue({ concurrency: 2 });
-
-        async function tarefaTeste(id) {
-            console.log(`Iniciando tarefa ${id}`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            console.log(`Finalizando tarefa ${id}`);
-            return id;
-        }
-
-        const resultadosTeste = await Promise.all(
-            [1, 2, 3, 4].map(i => queue.add(() => tarefaTeste(i)))
-        );
-        console.log('Resultados do teste p-queue:', resultadosTeste);
 
         await browser.close();
 

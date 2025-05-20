@@ -20,9 +20,9 @@
   "description": "",
   "dependencies": {
     "@sparticuz/chromium": "^133.0.0",
+    "async-sema": "^3.1.1",
     "crypto": "^1.0.1",
     "jsonwebtoken": "^9.0.2",
-    "p-queue": "^8.1.0",
     "puppeteer-core": "^24.8.2"
   }
 }
