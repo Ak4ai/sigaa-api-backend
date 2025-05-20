@@ -240,27 +240,10 @@ module.exports = async function handler(req, res) {
                     console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
 
                     // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
-                    const notasInfo = await page.evaluate(() => {
-                        const a = Array.from(document.querySelectorAll('a')).find(a =>
-                            a.querySelector('.itemMenu')?.innerText.trim() === 'Ver Notas'
-                        );
-                        if (!a) return null;
-                        const onclick = a.getAttribute('onclick');
-                        // Extrai o parâmetro dinâmico do jsfcljs
-                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
-                        return match ? match[1] : null;
-                    });
-                    
-                    if (!notasInfo) {
-                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
-                    }
-                    
-                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
-                    
-                    // Agora chama jsfcljs usando o código dinâmico encontrado
-                    
+                    const notasInfo = 'formMenu:j_id_jsp_122142787_99';
+                    console.log(`[${disciplina.disciplina}] Usando código estático do menu 'Notas':`, notasInfo);
+
                     await page.evaluate((codigo) => {
-                        console.log('Chamando jsfcljs com código dinâmico para Notas:', codigo);
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
                                 document.getElementById('formMenu'),
@@ -269,8 +252,8 @@ module.exports = async function handler(req, res) {
                             );
                         }
                     }, notasInfo);
-                    
-                    
+
+
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
                     // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
                     let notasHeaders = [];
