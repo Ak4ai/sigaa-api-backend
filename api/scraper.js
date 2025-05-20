@@ -183,12 +183,16 @@ module.exports = async function handler(req, res) {
                     await page.waitForSelector('.menu-direita', { timeout: 15000 });
                 }
 
-                // CAPTURA O NOME DA DISCIPLINA ATUAL DIRETO DO DOM
                 try {
-                    nomeDisciplinaAtual = await page.$eval('.descricao-disciplina, .disciplina, .titulo-disciplina, .subtitulo', el => el.innerText.trim());
+                    nomeDisciplinaAtual = await page.$eval('#linkNomeTurma', el => el.innerText.trim());
+                    console.log(`[${nomeDisciplinaAtual}] Nome da disciplina acessada`);
                 } catch {
-                    // fallback para o nome salvo no array, se não encontrar no DOM
-                    nomeDisciplinaAtual = disciplinasCodigos[i].nome;
+                    try {
+                        nomeDisciplinaAtual = await page.$eval('.descricao-disciplina, .disciplina, .titulo-disciplina, .subtitulo', el => el.innerText.trim());
+                    } catch {
+                        // fallback para o nome salvo no array, se não encontrar no DOM
+                        nomeDisciplinaAtual = disciplinasCodigos[i].nome;
+                    }
                 }
 
                 // ... restante do seu código, substitua disciplina.nome por nomeDisciplinaAtual ...
@@ -239,7 +243,7 @@ module.exports = async function handler(req, res) {
                 if (frequenciaNaoLancada) {
                     console.log(`[${nomeDisciplinaAtual}] Frequência ainda não lançada`);
                     disciplinasComAvisos.push({
-                        nome: nomeDisciplinaAtual,
+                        disciplina: nomeDisciplinaAtual,
                         ...disciplinasCodigos[i],
                         avisos,
                         frequencia: [],
@@ -321,7 +325,7 @@ module.exports = async function handler(req, res) {
                 if (notasNaoLancadas) {
                     console.log(`[${nomeDisciplinaAtual}] Notas ainda não lançadas`);
                     disciplinasComAvisos.push({
-                        nome: nomeDisciplinaAtual,
+                        disciplina: nomeDisciplinaAtual,
                         ...disciplinasCodigos[i],
                         avisos,
                         frequencia,
@@ -377,7 +381,7 @@ module.exports = async function handler(req, res) {
                 }
 
                 disciplinasComAvisos.push({
-                    nome: nomeDisciplinaAtual,
+                    disciplina: nomeDisciplinaAtual,
                     ...disciplinasCodigos[i],
                     avisos,
                     frequencia,
@@ -396,7 +400,7 @@ module.exports = async function handler(req, res) {
 
             } catch (e) {
                 console.log(`[${nomeDisciplinaAtual}] Erro geral: ${e.message}`);
-                disciplinasComAvisos.push({ nome: nomeDisciplinaAtual, ...disciplinasCodigos[i], avisos: [], frequencia: [], erro: e.message });
+                disciplinasComAvisos.push({ disciplina: nomeDisciplinaAtual, ...disciplinasCodigos[i], avisos: [], frequencia: [], erro: e.message });
                 // Se der erro na página de notas, tente voltar para a tela de disciplinas
                 try { 
                     console.log(`[${nomeDisciplinaAtual}] Tentando voltar para tela de disciplinas após erro`);
