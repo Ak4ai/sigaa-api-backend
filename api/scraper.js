@@ -3,14 +3,13 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
-// ...existing code...
-const PQueue = (await import('p-queue')).default;
-// ...existing code...
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    const PQueue = (await import('p-queue')).default;
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
