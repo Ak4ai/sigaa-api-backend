@@ -135,219 +135,162 @@ module.exports = async function handler(req, res) {
 
         console.time('avisos');
         const disciplinasComAvisos = [];
-        for (const disciplina of schedule) {
+
+        // Após coletar o schedule, entre na primeira disciplina via menu principal
+        await page.click('#form_acessarTurmaVirtual > a');
+        await page.waitForSelector('#formTurma', { timeout: 15000 });
+
+        // Coleta os códigos das disciplinas
+        const disciplinasCodigos = await page.$$eval('#formTurma a.linkTurma', links =>
+            links.map(link => {
+                const onclick = link.getAttribute('onclick');
+                const matchCodigo = onclick.match(/'([^']+)':'([^']+)'/);
+                const matchFrontEnd = onclick.match(/'frontEndIdTurma':'([^']+)'/);
+                return {
+                    nome: link.innerText.trim(),
+                    codigo: matchCodigo ? matchCodigo[2] : null,
+                    frontEndIdTurma: matchFrontEnd ? matchFrontEnd[1] : null
+                };
+            })
+        );
+
+        for (let i = 0; i < disciplinasCodigos.length; i++) {
+            const disciplina = disciplinasCodigos[i];
+            let avisos = [];
+            let frequencia = [];
+            let numeroAulasDefinidas = null;
+            let porcentagemFrequencia = null;
+            let notasHeaders = [];
+            let notas = [];
+            let avaliacoes = [];
+
             try {
-                await page.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 15000,
+                if (i !== 0) {
+                    // Troca para a disciplina usando jsfcljs
+                    await page.evaluate(({ codigo, frontEndIdTurma }) => {
+                        if (typeof jsfcljs === 'function') {
+                            jsfcljs(
+                                document.getElementById('formTurma'),
+                                { [codigo]: codigo, frontEndIdTurma },
+                                ''
+                            );
+                        }
+                    }, { codigo: disciplina.codigo, frontEndIdTurma: disciplina.frontEndIdTurma });
+
+                    await page.waitForSelector('.menu-direita', { timeout: 15000 });
+                }
+
+                // Coleta avisos
+                avisos = await page.$$eval('.menu-direita > li', items => {
+                    return items.map(li => ({
+                        data: li.querySelector('.data')?.innerText.trim(),
+                        descricao: li.querySelector('.descricao')?.innerText.trim()
+                    }));
                 });
 
-                const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;                const linkHandle = await page.evaluateHandle((xpath) => {
-                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                    return result.singleNodeValue;
-                }, xpath);
+                // Frequência
+                const frequenciaInfo = 'formMenu:j_id_jsp_311393315_97';
+                await page.evaluate((codigo) => {
+                    if (typeof jsfcljs === 'function') {
+                        jsfcljs(
+                            document.getElementById('formMenu'),
+                            { [codigo]: codigo },
+                            ''
+                        );
+                    }
+                }, frequenciaInfo);
 
-                if (linkHandle) {
-                    console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
-                    await Promise.all([
-                        linkHandle.click(),
-                        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
+                await page.waitForSelector('fieldset', { timeout: 7000 });
+
+                let frequenciaNaoLancada = false;
+                let tabelaFrequenciaVisivel = false;
+                try {
+                    await Promise.race([
+                        page.waitForSelector('fieldset > span', { timeout: 15000 }),
+                        page.waitForSelector('fieldset > table', { timeout: 15000 })
                     ]);
-                    console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
-
-                    await page.waitForSelector('.menu-direita', { timeout: 7000 });
-
-                    // Coleta avisos
-                    const avisos = await page.$$eval('.menu-direita > li', items => {
-                        return items.map(li => ({
-                            data: li.querySelector('.data')?.innerText.trim(),
-                            descricao: li.querySelector('.descricao')?.innerText.trim()
-                        }));
-                    });
-
-                    console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
-
-                    // Busca o elemento <a> do menu "Frequência" e extrai o parâmetro dinâmico do onclick
-                    const frequenciaInfo = 'formMenu:j_id_jsp_311393315_97';
-                    console.log(`[${disciplina.disciplina}] Usando código estático do menu 'Frequência':`, frequenciaInfo);
-
-                    await page.evaluate((codigo) => {
-                        if (typeof jsfcljs === 'function') {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                { [codigo]: codigo },
-                                ''
-                            );
-                        }
-                    }, frequenciaInfo);
-
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
-
-                    // Aguarda o fieldset aparecer (onde pode estar a mensagem ou a tabela)
-                    await page.waitForSelector('fieldset', { timeout: 7000 });
-
-                    // Espera ou a mensagem de frequência não lançada OU a tabela aparecerem, o que vier primeiro
-                    let frequenciaNaoLancada = false;
-                    let tabelaFrequenciaVisivel = false;
-                    try {
-                        await Promise.race([
-                            page.waitForSelector('fieldset > span', { timeout: 15000 }),
-                            page.waitForSelector('fieldset > table', { timeout: 15000 })
-                        ]);
-                        // Verifica se a mensagem apareceu
-                        frequenciaNaoLancada = await page.evaluate(() => {
-                            const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
-                                el.innerText.includes('A frequência ainda não foi lançada.')
-                            );
-                            return !!span;
-                        });
-                        // Verifica se a tabela já está visível
-                        tabelaFrequenciaVisivel = await page.$('fieldset > table') !== null;
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de frequência apareceram.`);
-                    }
-
-                    if (frequenciaNaoLancada) {
-                        console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
-                        disciplinasComAvisos.push({
-                            ...disciplina,
-                            avisos,
-                            frequencia: [],
-                            numeroAulasDefinidas: null,
-                            porcentagemFrequencia: null,
-                            mensagem: 'A frequência ainda não foi lançada.'
-                        });
-                        continue; // Pula para a próxima disciplina
-                    }
-
-                    // Só espera pela tabela se ela ainda não estiver visível
-                    if (!tabelaFrequenciaVisivel) {
-                        await page.waitForSelector('fieldset > table', { timeout: 15000 });
-                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
-                    }
-
-                    // Coleta a tabela de frequência
-                    console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
-                    const frequencia = await page.$$eval(
-                        'fieldset > table > tbody tr',
-                        rows => rows.map(tr => {
-                            const tds = tr.querySelectorAll('td');
-                            return {
-                                data: tds[0]?.innerText.trim(),
-                                status: tds[1]?.innerText.trim()
-                            };
-                        })
-                    );
-                    console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
-
-                    // Coleta o número de aulas definidas pela CH do componente
-                    const numeroAulasDefinidas = await page.$eval('.botoes-show', el => {
-                        const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
-                        return match ? parseInt(match[1], 10) : null;
-                    });
-                    console.log(`[${disciplina.disciplina}] Número de aulas definidas:`, numeroAulasDefinidas);
-
-                    // (Opcional) Coleta a porcentagem de frequência
-                    const porcentagemFrequencia = await page.$eval('.botoes-show', el => {
-                        const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
-                        return match ? parseInt(match[1], 10) : null;
-                    });
-                    console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
-
-                    // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
-                    const notasInfo = 'formMenu:j_id_jsp_122142787_99';
-                    console.log(`[${disciplina.disciplina}] Usando código estático do menu 'Notas':`, notasInfo);
-
-                    await page.evaluate((codigo) => {
-                        if (typeof jsfcljs === 'function') {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                { [codigo]: codigo },
-                                ''
-                            );
-                        }
-                    }, notasInfo);
-
-
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-
-                    // Aguarda ou a mensagem de notas não lançadas OU a tabela aparecer, o que vier primeiro
-                    let notasNaoLancadas = false;
-                    let tabelaNotasVisivel = false;
-                    try {
-                        await Promise.race([
-                            page.waitForSelector('ul.warning li', { timeout: 5000 }),
-                            page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 })
-                        ]);
-                        // Verifica se a mensagem apareceu
-                        notasNaoLancadas = await page.evaluate(() => {
-                            const li = Array.from(document.querySelectorAll('ul.warning li')).find(el =>
-                                el.innerText.includes('Ainda não foram lançadas notas.')
-                            );
-                            return !!li;
-                        });
-                        // Verifica se a tabela já está visível
-                        tabelaNotasVisivel = await page.$('table.tabelaRelatorio') !== null;
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de notas apareceram.`);
-                    }
-
-                    if (notasNaoLancadas) {
-                        console.log(`[${disciplina.disciplina}] Ainda não foram lançadas notas.`);
-                        disciplinasComAvisos.push({
-                            ...disciplina,
-                            avisos,
-                            frequencia,
-                            numeroAulasDefinidas,
-                            porcentagemFrequencia,
-                            notas: {
-                                headers: [],
-                                valores: [],
-                                avaliacoes: [],
-                                mensagem: 'Ainda não foram lançadas notas.'
-                            }
-                        });
-                        continue; // Pula para a próxima disciplina
-                    }
-
-                    // Só espera pela tabela se ela ainda não estiver visível
-                    if (!tabelaNotasVisivel) {
-                        try {
-                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                            console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                        } catch (e) {
-                            console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
-                        }
-                    }
-
-                    // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
-                    try {
-                        notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                            ths.map(th => th.innerText.trim()).filter(Boolean)
+                    frequenciaNaoLancada = await page.evaluate(() => {
+                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
+                            el.innerText.includes('A frequência ainda não foi lançada.')
                         );
-                        notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                            rows.map(tr => {
-                                const tds = Array.from(tr.querySelectorAll('td'));
-                                return tds.map(td => td.innerText.trim());
-                            })
-                        );
-                        // Captura nota, peso e den dos inputs escondidos do tr#trAval
-                        avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
-                            ths.map(th => {
-                                const id = th.id.replace('aval_', '');
-                                const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                                const den = document.getElementById('denAval_' + id)?.value || '';
-                                const nota = document.getElementById('notaAval_' + id)?.value || '';
-                                const peso = document.getElementById('pesoAval_' + id)?.value || '';
-                                return { abrev, den, nota, peso };
-                            })
-                        );
-                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
-                    }
+                        return !!span;
+                    });
+                    tabelaFrequenciaVisivel = await page.$('fieldset > table') !== null;
+                } catch (e) {}
 
-                    // Adicione o resultado ao array
+                if (frequenciaNaoLancada) {
+                    disciplinasComAvisos.push({
+                        ...disciplina,
+                        avisos,
+                        frequencia: [],
+                        numeroAulasDefinidas: null,
+                        porcentagemFrequencia: null,
+                        notas: {
+                            headers: [],
+                            valores: [],
+                            avaliacoes: [],
+                            mensagem: 'Ainda não foram lançadas notas.'
+                        },
+                        mensagem: 'A frequência ainda não foi lançada.'
+                    });
+                    continue;
+                }
+
+                if (!tabelaFrequenciaVisivel) {
+                    await page.waitForSelector('fieldset > table', { timeout: 15000 });
+                }
+
+                frequencia = await page.$$eval(
+                    'fieldset > table > tbody tr',
+                    rows => rows.map(tr => {
+                        const tds = tr.querySelectorAll('td');
+                        return {
+                            data: tds[0]?.innerText.trim(),
+                            status: tds[1]?.innerText.trim()
+                        };
+                    })
+                );
+
+                numeroAulasDefinidas = await page.$eval('.botoes-show', el => {
+                    const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
+                    return match ? parseInt(match[1], 10) : null;
+                });
+
+                porcentagemFrequencia = await page.$eval('.botoes-show', el => {
+                    const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
+                    return match ? parseInt(match[1], 10) : null;
+                });
+
+                // Notas
+                const notasInfo = 'formMenu:j_id_jsp_122142787_99';
+                await page.evaluate((codigo) => {
+                    if (typeof jsfcljs === 'function') {
+                        jsfcljs(
+                            document.getElementById('formMenu'),
+                            { [codigo]: codigo },
+                            ''
+                        );
+                    }
+                }, notasInfo);
+
+                // Aguarda ou a mensagem de notas não lançadas OU a tabela aparecer, o que vier primeiro
+                let notasNaoLancadas = false;
+                let tabelaNotasVisivel = false;
+                try {
+                    await Promise.race([
+                        page.waitForSelector('ul.warning li', { timeout: 5000 }),
+                        page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 })
+                    ]);
+                    notasNaoLancadas = await page.evaluate(() => {
+                        const li = Array.from(document.querySelectorAll('ul.warning li')).find(el =>
+                            el.innerText.includes('Ainda não foram lançadas notas.')
+                        );
+                        return !!li;
+                    });
+                    tabelaNotasVisivel = await page.$('table.tabelaRelatorio') !== null;
+                } catch (e) {}
+
+                if (notasNaoLancadas) {
                     disciplinasComAvisos.push({
                         ...disciplina,
                         avisos,
@@ -355,15 +298,65 @@ module.exports = async function handler(req, res) {
                         numeroAulasDefinidas,
                         porcentagemFrequencia,
                         notas: {
-                            headers: notasHeaders,
-                            valores: notas,
-                            avaliacoes // Inclui os detalhes das avaliações
+                            headers: [],
+                            valores: [],
+                            avaliacoes: [],
+                            mensagem: 'Ainda não foram lançadas notas.'
                         }
                     });
+                    // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
+                    await page.goBack();
+                    continue;
                 }
+
+                if (!tabelaNotasVisivel) {
+                    try {
+                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                    } catch (e) {}
+                }
+
+                try {
+                    notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                        ths.map(th => th.innerText.trim()).filter(Boolean)
+                    );
+                    notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                        rows.map(tr => {
+                            const tds = Array.from(tr.querySelectorAll('td'));
+                            return tds.map(td => td.innerText.trim());
+                        })
+                    );
+                    avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                        ths.map(th => {
+                            const id = th.id.replace('aval_', '');
+                            const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                            const den = document.getElementById('denAval_' + id)?.value || '';
+                            const nota = document.getElementById('notaAval_' + id)?.value || '';
+                            const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                            return { abrev, den, nota, peso };
+                        })
+                    );
+                } catch (e) {}
+
+                disciplinasComAvisos.push({
+                    ...disciplina,
+                    avisos,
+                    frequencia,
+                    numeroAulasDefinidas,
+                    porcentagemFrequencia,
+                    notas: {
+                        headers: notasHeaders,
+                        valores: notas,
+                        avaliacoes
+                    }
+                });
+
+                // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
+                await page.goBack();
+
             } catch (e) {
-                console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
                 disciplinasComAvisos.push({ ...disciplina, avisos: [], frequencia: [], erro: e.message });
+                // Se der erro na página de notas, tente voltar para a tela de disciplinas
+                try { await page.goBack(); } catch {}
             }
         }
         console.timeEnd('avisos');
