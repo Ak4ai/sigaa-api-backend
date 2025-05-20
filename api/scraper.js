@@ -166,7 +166,7 @@ module.exports = async function handler(req, res) {
 
             try {
                 if (i !== 0) {
-                    // Troca para a disciplina usando jsfcljs
+                    console.log(`[${disciplina.nome}] Trocando para disciplina via jsfcljs`);
                     await page.evaluate(({ codigo, frontEndIdTurma }) => {
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
@@ -177,10 +177,12 @@ module.exports = async function handler(req, res) {
                         }
                     }, { codigo: disciplina.codigo, frontEndIdTurma: disciplina.frontEndIdTurma });
 
+                    console.log(`[${disciplina.nome}] Aguardando menu-direita`);
                     await page.waitForSelector('.menu-direita', { timeout: 15000 });
                 }
 
                 // Coleta avisos
+                console.log(`[${disciplina.nome}] Coletando avisos`);
                 avisos = await page.$$eval('.menu-direita > li', items => {
                     return items.map(li => ({
                         data: li.querySelector('.data')?.innerText.trim(),
@@ -190,6 +192,7 @@ module.exports = async function handler(req, res) {
 
                 // Frequência
                 const frequenciaInfo = 'formMenu:j_id_jsp_311393315_97';
+                console.log(`[${disciplina.nome}] Acessando frequência`);
                 await page.evaluate((codigo) => {
                     if (typeof jsfcljs === 'function') {
                         jsfcljs(
@@ -200,11 +203,13 @@ module.exports = async function handler(req, res) {
                     }
                 }, frequenciaInfo);
 
+                console.log(`[${disciplina.nome}] Aguardando fieldset de frequência`);
                 await page.waitForSelector('fieldset', { timeout: 7000 });
 
                 let frequenciaNaoLancada = false;
                 let tabelaFrequenciaVisivel = false;
                 try {
+                    console.log(`[${disciplina.nome}] Verificando se frequência foi lançada`);
                     await Promise.race([
                         page.waitForSelector('fieldset > span', { timeout: 15000 }),
                         page.waitForSelector('fieldset > table', { timeout: 15000 })
@@ -216,9 +221,12 @@ module.exports = async function handler(req, res) {
                         return !!span;
                     });
                     tabelaFrequenciaVisivel = await page.$('fieldset > table') !== null;
-                } catch (e) {}
+                } catch (e) {
+                    console.log(`[${disciplina.nome}] Erro ao verificar frequência: ${e.message}`);
+                }
 
                 if (frequenciaNaoLancada) {
+                    console.log(`[${disciplina.nome}] Frequência ainda não lançada`);
                     disciplinasComAvisos.push({
                         ...disciplina,
                         avisos,
@@ -237,9 +245,11 @@ module.exports = async function handler(req, res) {
                 }
 
                 if (!tabelaFrequenciaVisivel) {
+                    console.log(`[${disciplina.nome}] Aguardando tabela de frequência`);
                     await page.waitForSelector('fieldset > table', { timeout: 15000 });
                 }
 
+                console.log(`[${disciplina.nome}] Coletando frequência`);
                 frequencia = await page.$$eval(
                     'fieldset > table > tbody tr',
                     rows => rows.map(tr => {
@@ -251,11 +261,13 @@ module.exports = async function handler(req, res) {
                     })
                 );
 
+                console.log(`[${disciplina.nome}] Coletando número de aulas definidas`);
                 numeroAulasDefinidas = await page.$eval('.botoes-show', el => {
                     const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
                     return match ? parseInt(match[1], 10) : null;
                 });
 
+                console.log(`[${disciplina.nome}] Coletando porcentagem de frequência`);
                 porcentagemFrequencia = await page.$eval('.botoes-show', el => {
                     const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
                     return match ? parseInt(match[1], 10) : null;
@@ -263,6 +275,7 @@ module.exports = async function handler(req, res) {
 
                 // Notas
                 const notasInfo = 'formMenu:j_id_jsp_122142787_99';
+                console.log(`[${disciplina.nome}] Acessando notas`);
                 await page.evaluate((codigo) => {
                     if (typeof jsfcljs === 'function') {
                         jsfcljs(
@@ -277,6 +290,7 @@ module.exports = async function handler(req, res) {
                 let notasNaoLancadas = false;
                 let tabelaNotasVisivel = false;
                 try {
+                    console.log(`[${disciplina.nome}] Verificando se notas foram lançadas`);
                     await Promise.race([
                         page.waitForSelector('ul.warning li', { timeout: 5000 }),
                         page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 })
@@ -288,9 +302,12 @@ module.exports = async function handler(req, res) {
                         return !!li;
                     });
                     tabelaNotasVisivel = await page.$('table.tabelaRelatorio') !== null;
-                } catch (e) {}
+                } catch (e) {
+                    console.log(`[${disciplina.nome}] Erro ao verificar notas: ${e.message}`);
+                }
 
                 if (notasNaoLancadas) {
+                    console.log(`[${disciplina.nome}] Notas ainda não lançadas`);
                     disciplinasComAvisos.push({
                         ...disciplina,
                         avisos,
@@ -305,26 +322,33 @@ module.exports = async function handler(req, res) {
                         }
                     });
                     // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
+                    console.log(`[${disciplina.nome}] Voltando para tela de disciplinas`);
                     await page.goBack();
                     continue;
                 }
 
                 if (!tabelaNotasVisivel) {
                     try {
+                        console.log(`[${disciplina.nome}] Aguardando tabela de notas`);
                         await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                    } catch (e) {}
+                    } catch (e) {
+                        console.log(`[${disciplina.nome}] Erro ao aguardar tabela de notas: ${e.message}`);
+                    }
                 }
 
                 try {
+                    console.log(`[${disciplina.nome}] Coletando cabeçalhos de notas`);
                     notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
                         ths.map(th => th.innerText.trim()).filter(Boolean)
                     );
+                    console.log(`[${disciplina.nome}] Coletando valores de notas`);
                     notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
                         rows.map(tr => {
                             const tds = Array.from(tr.querySelectorAll('td'));
                             return tds.map(td => td.innerText.trim());
                         })
                     );
+                    console.log(`[${disciplina.nome}] Coletando avaliações`);
                     avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
                         ths.map(th => {
                             const id = th.id.replace('aval_', '');
@@ -335,7 +359,9 @@ module.exports = async function handler(req, res) {
                             return { abrev, den, nota, peso };
                         })
                     );
-                } catch (e) {}
+                } catch (e) {
+                    console.log(`[${disciplina.nome}] Erro ao coletar notas: ${e.message}`);
+                }
 
                 disciplinasComAvisos.push({
                     ...disciplina,
@@ -351,12 +377,17 @@ module.exports = async function handler(req, res) {
                 });
 
                 // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
+                console.log(`[${disciplina.nome}] Voltando para tela de disciplinas`);
                 await page.goBack();
 
             } catch (e) {
+                console.log(`[${disciplina.nome}] Erro geral: ${e.message}`);
                 disciplinasComAvisos.push({ ...disciplina, avisos: [], frequencia: [], erro: e.message });
                 // Se der erro na página de notas, tente voltar para a tela de disciplinas
-                try { await page.goBack(); } catch {}
+                try { 
+                    console.log(`[${disciplina.nome}] Tentando voltar para tela de disciplinas após erro`);
+                    await page.goBack(); 
+                } catch {}
             }
         }
         console.timeEnd('avisos');
