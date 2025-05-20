@@ -87,7 +87,17 @@ module.exports = async function handler(req, res) {
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
         ]);
 
-        await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
+        // Após login:
+        const html = await page.content();
+        console.log('HTML após login:', html.slice(0, 1000)); // Mostra os primeiros 1000 caracteres
+
+        const loginError = await page.$('.mensagemErro');
+        if (loginError) {
+            const errorMsg = await page.evaluate(el => el.innerText, loginError);
+            throw new Error('Erro de login: ' + errorMsg);
+        }
+
+        await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 20000 });
 
         const dadosInstitucionais = await page.$$eval(
             '#agenda-docente table tbody tr',
