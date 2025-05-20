@@ -219,22 +219,34 @@ module.exports = async function handler(req, res) {
                     }, { codigo: disciplinasCodigos[i].codigo, frontEndIdTurma: disciplinasCodigos[i].frontEndIdTurma });
 
                     console.log(`[DEBUG] Aguardando atualização do nome da disciplina no DOM...`);
-                    await page.waitForFunction(
-                        (nomeEsperado, limparNomeDisciplinaStr) => {
-                            const limparNomeDisciplina = new Function('nomeCompleto', limparNomeDisciplinaStr);
-                            const el = document.querySelector('#linkNomeTurma');
-                            if (!el) {
-                                window._sigaaDebugLastNome = '[Elemento não encontrado]';
-                                return false;
-                            }
-                            const nomeAtual = limparNomeDisciplina(el.innerText.trim());
-                            window._sigaaDebugLastNome = nomeAtual;
-                            return nomeAtual === nomeEsperado;
-                        },
-                        { timeout: 15000 },
-                        limparNomeDisciplina(disciplinasCodigos[i].nome),
-                        limparNomeDisciplina.toString()
-                    );
+                    try {
+                        await page.waitForFunction(
+                            (nomeEsperado, limparNomeDisciplinaStr) => {
+                                const limparNomeDisciplina = new Function('nomeCompleto', limparNomeDisciplinaStr);
+                                const el = document.querySelector('#linkNomeTurma');
+                                if (!el) {
+                                    window._sigaaDebugLastNome = '[Elemento não encontrado]';
+                                    return false;
+                                }
+                                const nomeAtual = limparNomeDisciplina(el.innerText.trim());
+                                window._sigaaDebugLastNome = nomeAtual;
+                                return nomeAtual === nomeEsperado;
+                            },
+                            { timeout: 15000 },
+                            limparNomeDisciplina(disciplinasCodigos[i].nome),
+                            limparNomeDisciplina.toString()
+                        );
+                        // Sucesso: log normalmente
+                        const nomeAchado = await page.evaluate(() => window._sigaaDebugLastNome);
+                        console.log(`[DEBUG] Nome encontrado no DOM após troca: "${nomeAchado}"`);
+                        console.log(`[DEBUG] Comparação: "${nomeAchado}" === "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
+                    } catch (e) {
+                        // Timeout: log o último nome encontrado
+                        const nomeAchado = await page.evaluate(() => window._sigaaDebugLastNome);
+                        console.log(`[ERRO] Timeout ao aguardar troca de disciplina! Último nome encontrado: "${nomeAchado}"`);
+                        console.log(`[ERRO] Comparação: "${nomeAchado}" === "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
+                        throw e; // Se quiser continuar o erro, ou trate conforme necessário
+                    }
 
                     // Após o waitForFunction, logue o último nome encontrado no DOM
                     const nomeAchado = await page.evaluate(() => window._sigaaDebugLastNome);
