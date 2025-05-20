@@ -269,6 +269,7 @@ module.exports = async function handler(req, res) {
 
                     // Aguarda ou a mensagem de notas não lançadas OU a tabela aparecer, o que vier primeiro
                     let notasNaoLancadas = false;
+                    let tabelaNotasVisivel = false;
                     try {
                         await Promise.race([
                             page.waitForSelector('ul.warning li', { timeout: 5000 }),
@@ -281,6 +282,8 @@ module.exports = async function handler(req, res) {
                             );
                             return !!li;
                         });
+                        // Verifica se a tabela já está visível
+                        tabelaNotasVisivel = await page.$('table.tabelaRelatorio') !== null;
                     } catch (e) {
                         console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de notas apareceram.`);
                     }
@@ -303,12 +306,14 @@ module.exports = async function handler(req, res) {
                         continue; // Pula para a próxima disciplina
                     }
 
-                    // Se não encontrou a mensagem, aguarda a tabela normalmente (caso não tenha aparecido ainda)
-                    try {
-                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                        console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                    // Só espera pela tabela se ela ainda não estiver visível
+                    if (!tabelaNotasVisivel) {
+                        try {
+                            await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                            console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                        }
                     }
 
                     // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
