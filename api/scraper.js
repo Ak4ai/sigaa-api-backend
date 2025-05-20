@@ -140,18 +140,25 @@ module.exports = async function handler(req, res) {
         await page.click('#form_acessarTurmaVirtual > a');
         await page.waitForSelector('#formTurma', { timeout: 15000 });
 
+        // Defina o prefixo fixo conforme o padrão desejado
+        const codigoPrefixo = 'formTurma:j_id_jsp_122142787_7';
+
         // Coleta os códigos das disciplinas
-        const disciplinasCodigos = await page.$$eval('#formTurma a.linkTurma', links =>
-            links.map(link => {
+        const disciplinasCodigos = await page.$$eval('#formTurma a.linkTurma', (links, codigoPrefixo) =>
+            links.map((link, idx) => {
                 const onclick = link.getAttribute('onclick');
-                const matchCodigo = onclick.match(/'([^']+)':'([^']+)'/);
                 const matchFrontEnd = onclick.match(/'frontEndIdTurma':'([^']+)'/);
+                // Gera o código conforme o padrão fixo
+                let codigo = idx === 0
+                    ? codigoPrefixo
+                    : `${codigoPrefixo}j_id_${idx}`;
                 return {
                     nome: link.innerText.trim(),
-                    codigo: matchCodigo ? matchCodigo[2] : null,
+                    codigo,
                     frontEndIdTurma: matchFrontEnd ? matchFrontEnd[1] : null
                 };
-            })
+            }),
+            codigoPrefixo
         );
 
         console.log('Disciplinas encontradas:', disciplinasCodigos);
