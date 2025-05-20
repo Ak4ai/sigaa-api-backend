@@ -422,7 +422,11 @@ module.exports = async function handler(req, res) {
         });
 
     } catch (error) {
+        console.error('Erro no handler:', error); // <--- Adicione esta linha
         if (browser) await browser.close();
-        return res.status(500).json({ error: error.message || 'Erro interno' });
+        return res.status(500).json({ 
+            error: error.message || 'Erro interno',
+            stack: error.stack // <--- Adicione isto para debug temporário
+        });
     }
 };
