@@ -9,24 +9,6 @@ const pLimit = require('p-limit');
 
 const limit = pLimit(2); // Limite de 2 tarefas em paralelo
 
-// Função assíncrona simulada
-async function tarefa(id) {
-    console.log(`Iniciando tarefa ${id}`);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    console.log(`Finalizando tarefa ${id}`);
-    return id;
-}
-
-// Cria 5 tarefas limitadas pelo p-limit
-async function teste() {
-    const resultados = await Promise.all(
-        [1, 2, 3, 4, 5].map(i => limit(() => tarefa(i)))
-    );
-    console.log('Resultados:', resultados);
-}
-
-teste();
-
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -80,6 +62,26 @@ module.exports = async function handler(req, res) {
                       headless: chromium.headless,
                   }
         );
+
+        
+
+        // Função assíncrona simulada
+        async function tarefa(id) {
+            console.log(`Iniciando tarefa ${id}`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log(`Finalizando tarefa ${id}`);
+            return id;
+        }
+
+        // Cria 5 tarefas limitadas pelo p-limit
+        async function teste() {
+            const resultados = await Promise.all(
+                [1, 2, 3, 4, 5].map(i => limit(() => tarefa(i)))
+            );
+            console.log('Resultados:', resultados);
+        }
+
+        teste();
 
         // Cria apenas UMA aba para todas as disciplinas
         const page = await browser.newPage();
