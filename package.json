@@ -22,7 +22,6 @@
     "@sparticuz/chromium": "^133.0.0",
     "crypto": "^1.0.1",
     "jsonwebtoken": "^9.0.2",
-    "puppeteer-cluster": "^0.24.0",
     "puppeteer-core": "^24.8.2"
   }
 }
