@@ -178,8 +178,6 @@ module.exports = async function handler(req, res) {
 
             try {
                 if (i !== 0) {
-                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Trocando para disciplina via jsfcljs`);
-                    // Salva o nome anterior (limpo)
                     const nomeAnterior = limparNomeDisciplina(
                         await page.$eval('#linkNomeTurma', el => el.innerText.trim())
                     );
@@ -193,17 +191,17 @@ module.exports = async function handler(req, res) {
                         }
                     }, { codigo: disciplinasCodigos[i].codigo, frontEndIdTurma: disciplinasCodigos[i].frontEndIdTurma });
 
-                    // Aguarda até que o nome da disciplina mude no DOM (limpando para comparar)
+                    // Aguarda até que o nome LIMPO da disciplina no DOM seja igual ao nome LIMPO da disciplina atual
                     await page.waitForFunction(
-                        (nomeAnterior, limparNomeDisciplinaStr) => {
+                        (nomeEsperado, limparNomeDisciplinaStr) => {
                             const limparNomeDisciplina = new Function('nomeCompleto', limparNomeDisciplinaStr);
                             const el = document.querySelector('#linkNomeTurma');
                             if (!el) return false;
                             const nomeAtual = limparNomeDisciplina(el.innerText.trim());
-                            return nomeAtual !== nomeAnterior;
+                            return nomeAtual === nomeEsperado;
                         },
                         { timeout: 15000 },
-                        nomeAnterior,
+                        limparNomeDisciplina(disciplinasCodigos[i].nome),
                         limparNomeDisciplina.toString()
                     );
 
