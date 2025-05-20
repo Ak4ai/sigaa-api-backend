@@ -5,15 +5,13 @@ const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
 
 module.exports = async function handler(req, res) {
-    // Carregue p-limit dinamicamente aqui
-    const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(2); // Limite de 2 tarefas em paralelo
-
-    // ...restante do seu código...
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    // Carregue p-limit dinamicamente aqui
+    const pLimit = (await import('p-limit')).default;
+    const limit = pLimit(2); // Limite de 2 tarefas em paralelo
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
