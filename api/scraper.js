@@ -3,23 +3,7 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
-
-// Refatorado: aceita workerIndex e extraArgs (ex: pages)
-async function processWithConcurrency(items, handler, maxConcurrency = 3, extraArgs = {}) {
-    const results = [];
-    let index = 0;
-
-    async function runNext(workerIndex) {
-        if (index >= items.length) return;
-        const currentIndex = index++;
-        results[currentIndex] = await handler(items[currentIndex], workerIndex, extraArgs);
-        return runNext(workerIndex);
-    }
-
-    const workers = Array.from({ length: maxConcurrency }, (_, i) => runNext(i));
-    await Promise.all(workers);
-    return results;
-}
+const limit = pLimit(3); // Limite de 3 tarefas em paralelo
 
 module.exports = async function handler(req, res) {
     // CORS headers
