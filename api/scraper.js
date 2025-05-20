@@ -168,25 +168,9 @@ module.exports = async function handler(req, res) {
                     console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
 
                     // Busca o elemento <a> do menu "Frequência" e extrai o parâmetro dinâmico do onclick
-                    const frequenciaInfo = await page.evaluate(() => {
-                        const a = Array.from(document.querySelectorAll('a')).find(a =>
-                            a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
-                        );
-                        if (!a) return null;
-                        const onclick = a.getAttribute('onclick');
-                        // Extrai o parâmetro dinâmico do jsfcljs
-                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
-                        console.log('onclick:', onclick);
-                        return match ? match[1] : null;
-                    });
+                    const frequenciaInfo = 'formMenu:j_id_jsp_311393315_97';
+                    console.log(`[${disciplina.disciplina}] Usando código estático do menu 'Frequência':`, frequenciaInfo);
 
-                    if (!frequenciaInfo) {
-                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Frequência'.");
-                    }
-
-                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Frequência':`, frequenciaInfo);
-
-                    // Agora chama jsfcljs usando o código dinâmico encontrado
                     await page.evaluate((codigo) => {
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
