@@ -64,7 +64,7 @@ module.exports = async function handler(req, res) {
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const type = req.resourceType();
-            if (['stylesheet', 'font', 'image'].includes(type)) {
+            if (['stylesheet', 'font', 'image', 'media', 'other'].includes(type)) {
                 req.abort();
             } else {
                 req.continue();
