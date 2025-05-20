@@ -188,6 +188,7 @@ module.exports = async function handler(req, res) {
 
                     // Espera ou a mensagem de frequência não lançada OU a tabela aparecerem, o que vier primeiro
                     let frequenciaNaoLancada = false;
+                    let tabelaFrequenciaVisivel = false;
                     try {
                         await Promise.race([
                             page.waitForSelector('fieldset > span', { timeout: 15000 }),
@@ -200,8 +201,9 @@ module.exports = async function handler(req, res) {
                             );
                             return !!span;
                         });
+                        // Verifica se a tabela já está visível
+                        tabelaFrequenciaVisivel = await page.$('fieldset > table') !== null;
                     } catch (e) {
-                        // Nenhum dos dois apareceu, pode tratar como erro ou seguir conforme necessário
                         console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de frequência apareceram.`);
                     }
 
@@ -218,9 +220,11 @@ module.exports = async function handler(req, res) {
                         continue; // Pula para a próxima disciplina
                     }
 
-                    // Se não encontrou a mensagem, aguarda a tabela normalmente (caso não tenha aparecido ainda)
-                    await page.waitForSelector('fieldset > table', { timeout: 15000 });
-                    console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
+                    // Só espera pela tabela se ela ainda não estiver visível
+                    if (!tabelaFrequenciaVisivel) {
+                        await page.waitForSelector('fieldset > table', { timeout: 15000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
+                    }
 
                     // Coleta a tabela de frequência
                     console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
