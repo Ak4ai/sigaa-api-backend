@@ -5,7 +5,7 @@ const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
 
 const { Sema } = require('async-sema');
-const sema = new Sema(2); // Limite de 2 tarefas
+const sema = new Sema(3); // Limite de 2 tarefas
 
 module.exports = async function handler(req, res) {
     // CORS headers
