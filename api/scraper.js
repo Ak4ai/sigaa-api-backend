@@ -8,6 +8,18 @@ module.exports = async function handler(req, res) {
     // Carregue p-limit dinamicamente aqui
     const pLimit = (await import('p-limit')).default;
     const limit = pLimit(2); // Limite de 2 tarefas em paralelo
+
+    // Teste do p-limit
+    async function tarefaTeste(id) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return id;
+    }
+    const resultadosTeste = await Promise.all(
+        [1, 2, 3, 4].map(i => limit(() => tarefaTeste(i)))
+    );
+    console.log('Resultados do teste p-limit:', resultadosTeste);
+
+    // ...restante do seu código...
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
