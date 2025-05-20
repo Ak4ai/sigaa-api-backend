@@ -375,7 +375,7 @@ module.exports = async function handler(req, res) {
                     });
                     // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
                     console.log(`[${nomeDisciplinaAtual}] Voltando para tela de disciplinas`);
-                    await page.goBack();
+                    //await page.goBack();
                     continue;
                 }
 
