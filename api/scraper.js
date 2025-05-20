@@ -38,7 +38,7 @@ module.exports = async function handler(req, res) {
     try {
         cluster = await Cluster.launch({
             concurrency: Cluster.CONCURRENCY_CONTEXT,
-            maxConcurrency: 2,
+            maxConcurrency: 1,
             puppeteerOptions: {
                 executablePath: await chromium.executablePath(),
                 headless: chromium.headless,
@@ -47,40 +47,22 @@ module.exports = async function handler(req, res) {
         });
 
         // Login e coleta de dados institucionais e schedule (apenas uma vez)
-        const { dadosInstitucionais, schedule, detailedSchedule, simplifiedSchedule } = await (async () => {
-            const browser = await puppeteer.launch({
-                executablePath: await chromium.executablePath(),
-                headless: chromium.headless,
-                args: chromium.args,
-            });
-            const page = await browser.newPage();
-            await page.setViewport({ width: 1024, height: 600 });
-            await page.setRequestInterception(true);
-            page.on('request', (req) => {
-                const type = req.resourceType();
-                if (['stylesheet', 'font', 'image'].includes(type)) {
-                    req.abort();
-                } else {
-                    req.continue();
-                }
-            });
+        let dadosInstitucionais, schedule, detailedSchedule, simplifiedSchedule;
 
+        await cluster.task(async ({ page, data }) => {
             await page.goto('https://sig.cefetmg.br/sigaa/verTelaLogin.do', {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000,
             });
-
-            await page.type('#conteudo input[type=text]', user);
-            await page.type('#conteudo input[type=password]', pass);
-
+            await page.type('#conteudo input[type=text]', data.user);
+            await page.type('#conteudo input[type=password]', data.pass);
             await Promise.all([
                 page.click('#conteudo input[type=submit]'),
                 page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
             ]);
-
             await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
 
-            const dadosInstitucionais = await page.$$eval(
+            dadosInstitucionais = await page.$$eval(
                 '#agenda-docente table tbody tr',
                 rows => {
                     const obj = {};
@@ -98,7 +80,7 @@ module.exports = async function handler(req, res) {
 
             await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
 
-            const schedule = await page.$$eval('tbody tr', rows => {
+            schedule = await page.$$eval('tbody tr', rows => {
                 let term = '';
                 const data = [];
                 for (const row of rows) {
@@ -107,7 +89,6 @@ module.exports = async function handler(req, res) {
                         term = span.innerText.trim();
                         continue;
                     }
-
                     if (row.querySelector('form[id^="form_acessarTurmaVirtual"]')) {
                         const desc = row.querySelector('td.descricao');
                         const name = desc.querySelector('a')?.innerText.trim() ?? desc.innerText.trim();
@@ -121,13 +102,12 @@ module.exports = async function handler(req, res) {
                 }
                 return data;
             });
+        });
 
-            const detailedSchedule = interpretSchedule(schedule);
-            const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
+        await cluster.execute({ user, pass });
 
-            await browser.close();
-            return { dadosInstitucionais, schedule, detailedSchedule, simplifiedSchedule };
-        })();
+        detailedSchedule = interpretSchedule(schedule);
+        simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
 
         // Cluster task: processa cada disciplina isoladamente
         const disciplinasComAvisos = [];
