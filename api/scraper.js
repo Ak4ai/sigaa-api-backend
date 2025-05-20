@@ -186,13 +186,24 @@ module.exports = async function handler(req, res) {
                     // Aguarda o fieldset aparecer (onde pode estar a mensagem ou a tabela)
                     await page.waitForSelector('fieldset', { timeout: 7000 });
 
-                    // Verifica se existe a mensagem de frequência não lançada
-                    const frequenciaNaoLancada = await page.evaluate(() => {
-                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
-                            el.innerText.includes('A frequência ainda não foi lançada.')
-                        );
-                        return !!span;
-                    });
+                    // Espera ou a mensagem de frequência não lançada OU a tabela aparecerem, o que vier primeiro
+                    let frequenciaNaoLancada = false;
+                    try {
+                        await Promise.race([
+                            page.waitForSelector('fieldset > span', { timeout: 15000 }),
+                            page.waitForSelector('fieldset > table', { timeout: 15000 })
+                        ]);
+                        // Verifica se a mensagem apareceu
+                        frequenciaNaoLancada = await page.evaluate(() => {
+                            const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
+                                el.innerText.includes('A frequência ainda não foi lançada.')
+                            );
+                            return !!span;
+                        });
+                    } catch (e) {
+                        // Nenhum dos dois apareceu, pode tratar como erro ou seguir conforme necessário
+                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de frequência apareceram.`);
+                    }
 
                     if (frequenciaNaoLancada) {
                         console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
@@ -207,7 +218,7 @@ module.exports = async function handler(req, res) {
                         continue; // Pula para a próxima disciplina
                     }
 
-                    // Se não encontrou a mensagem, aguarda a tabela normalmente
+                    // Se não encontrou a mensagem, aguarda a tabela normalmente (caso não tenha aparecido ainda)
                     await page.waitForSelector('fieldset > table', { timeout: 15000 });
                     console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
 
@@ -255,10 +266,44 @@ module.exports = async function handler(req, res) {
 
 
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-                    // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
-                    let notasHeaders = [];
-                    let notas = [];
-                    let avaliacoes = [];
+
+                    // Aguarda ou a mensagem de notas não lançadas OU a tabela aparecer, o que vier primeiro
+                    let notasNaoLancadas = false;
+                    try {
+                        await Promise.race([
+                            page.waitForSelector('ul.warning li', { timeout: 5000 }),
+                            page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 })
+                        ]);
+                        // Verifica se a mensagem apareceu
+                        notasNaoLancadas = await page.evaluate(() => {
+                            const li = Array.from(document.querySelectorAll('ul.warning li')).find(el =>
+                                el.innerText.includes('Ainda não foram lançadas notas.')
+                            );
+                            return !!li;
+                        });
+                    } catch (e) {
+                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de notas apareceram.`);
+                    }
+
+                    if (notasNaoLancadas) {
+                        console.log(`[${disciplina.disciplina}] Ainda não foram lançadas notas.`);
+                        disciplinasComAvisos.push({
+                            ...disciplina,
+                            avisos,
+                            frequencia,
+                            numeroAulasDefinidas,
+                            porcentagemFrequencia,
+                            notas: {
+                                headers: [],
+                                valores: [],
+                                avaliacoes: [],
+                                mensagem: 'Ainda não foram lançadas notas.'
+                            }
+                        });
+                        continue; // Pula para a próxima disciplina
+                    }
+
+                    // Se não encontrou a mensagem, aguarda a tabela normalmente (caso não tenha aparecido ainda)
                     try {
                         await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
                         console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
