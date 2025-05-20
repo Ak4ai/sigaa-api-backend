@@ -7,23 +7,35 @@ const { validarTokenLogin } = require('./auth');
 const { Sema } = require('async-sema');
 const sema = new Sema(2); // Limite de 2 tarefas
 
-
-
-
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    await Promise.all(schedule.map(async disciplina => {
-        await sema.acquire();
-        try {
-            // ...processa a disciplina...
-        } finally {
-            sema.release();
-        }
-    }));
+        // ...existing code inside handler...
+    
+    // Teste simples do async-sema
+    console.log('Iniciando teste do async-sema');
+    const resultadosTeste = [];
+    
+    await Promise.all(
+        [1, 2, 3, 4].map(async (i) => {
+            await sema.acquire();
+            try {
+                console.log(`Iniciando tarefa ${i}`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                console.log(`Finalizando tarefa ${i}`);
+                resultadosTeste.push(i);
+            } finally {
+                sema.release();
+            }
+        })
+    );
+    
+    console.log('Resultados do teste async-sema:', resultadosTeste);
+    
+    // ...restante do seu código...
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
