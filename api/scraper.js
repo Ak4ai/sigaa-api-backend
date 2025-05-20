@@ -3,7 +3,29 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
-const limit = pLimit(3); // Limite de 3 tarefas em paralelo
+
+// Exemplo simples de uso do p-limit
+const pLimit = require('p-limit');
+
+const limit = pLimit(2); // Limite de 2 tarefas em paralelo
+
+// Função assíncrona simulada
+async function tarefa(id) {
+    console.log(`Iniciando tarefa ${id}`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log(`Finalizando tarefa ${id}`);
+    return id;
+}
+
+// Cria 5 tarefas limitadas pelo p-limit
+async function teste() {
+    const resultados = await Promise.all(
+        [1, 2, 3, 4, 5].map(i => limit(() => tarefa(i)))
+    );
+    console.log('Resultados:', resultados);
+}
+
+teste();
 
 module.exports = async function handler(req, res) {
     // CORS headers
