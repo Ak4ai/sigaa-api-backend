@@ -229,8 +229,7 @@ module.exports = async function handler(req, res) {
                 }
 
                 try {
-                    nomeDisciplinaAtual = limparNomeDisciplina(
-                        await page.$eval('#linkNomeTurma', el => el.innerText.trim())
+                    nomeDisciplinaAtual = (await page.$eval('#linkNomeTurma', el => el.innerText.trim())
                     );
                     console.log(`[${nomeDisciplinaAtual}] Nome da disciplina acessada`);
                 } catch {
