@@ -5,21 +5,6 @@ const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
 
 module.exports = async function handler(req, res) {
-    // Carregue p-limit dinamicamente aqui
-    const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(2); // Limite de 2 tarefas em paralelo
-
-    // Teste do p-limit
-    async function tarefaTeste(id) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return id;
-    }
-    const resultadosTeste = await Promise.all(
-        [1, 2, 3, 4].map(i => limit(() => tarefaTeste(i)))
-    );
-    console.log('Resultados do teste p-limit:', resultadosTeste);
-
-    // ...restante do seu código...
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -99,11 +84,7 @@ module.exports = async function handler(req, res) {
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
         ]);
 
-        // Log do HTML para debug
-        const html = await page.content();
-        console.log('HTML após login:', html.slice(0, 1000)); // Mostra os primeiros 1000 caracteres
-
-        await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 20000 });
+        await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
 
         const dadosInstitucionais = await page.$$eval(
             '#agenda-docente table tbody tr',
@@ -304,69 +285,45 @@ module.exports = async function handler(req, res) {
                             );
                         }
                     }, notasInfo);
-
+                    
+                    
                     console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-
-                    let notasNaoLancadas = false;
-                    try {
-                        // Espera o que aparecer primeiro: a mensagem ou a tabela
-                        await Promise.race([
-                            page.waitForFunction(() => {
-                                const li = document.evaluate(
-                                    "/html/body/div[1]/div[7]/div/div/ul/li",
-                                    document,
-                                    null,
-                                    XPathResult.FIRST_ORDERED_NODE_TYPE,
-                                    null
-                                ).singleNodeValue;
-                                return li && li.innerText.includes("Ainda não foram lançadas notas.");
-                            }, { timeout: 3000 }).then(() => {
-                                notasNaoLancadas = true;
-                                console.log(`[${disciplina.disciplina}] Mensagem de notas não lançadas encontrada.`);
-                            }),
-                            page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 }).then(() => {
-                                console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                            })
-                        ]);
-                    } catch (e) {
-                        // Nenhum dos dois apareceu no tempo limite
-                        console.warn(`[${disciplina.disciplina}] Nem mensagem nem tabela de notas apareceram no tempo limite.`);
-                    }
-
+                    // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
                     let notasHeaders = [];
                     let notas = [];
                     let avaliacoes = [];
-                    if (!notasNaoLancadas) {
-                        // Extrai os dados da tabela normalmente
-                        try {
-                            notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                                ths.map(th => th.innerText.trim()).filter(Boolean)
-                            );
-                            notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                                rows.map(tr => {
-                                    const tds = Array.from(tr.querySelectorAll('td'));
-                                    return tds.map(td => td.innerText.trim());
-                                })
-                            );
-                            avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
-                                ths.map(th => {
-                                    const id = th.id.replace('aval_', '');
-                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                                    const den = document.getElementById('denAval_' + id)?.value || '';
-                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
-                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
-                                    return { abrev, den, nota, peso };
-                                })
-                            );
-                            console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
-                        } catch (e) {
-                            console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
-                        }
-                    } else {
-                        // Não há notas lançadas
-                        notasHeaders = [];
-                        notas = [];
-                        avaliacoes = [];
+                    try {
+                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                    } catch (e) {
+                        console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                    }
+
+                    // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
+                    try {
+                        notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                            ths.map(th => th.innerText.trim()).filter(Boolean)
+                        );
+                        notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                            rows.map(tr => {
+                                const tds = Array.from(tr.querySelectorAll('td'));
+                                return tds.map(td => td.innerText.trim());
+                            })
+                        );
+                        // Captura nota, peso e den dos inputs escondidos do tr#trAval
+                        avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                            ths.map(th => {
+                                const id = th.id.replace('aval_', '');
+                                const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                                const den = document.getElementById('denAval_' + id)?.value || '';
+                                const nota = document.getElementById('notaAval_' + id)?.value || '';
+                                const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                                return { abrev, den, nota, peso };
+                            })
+                        );
+                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
+                    } catch (e) {
+                        console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
                     }
 
                     // Adicione o resultado ao array
@@ -402,8 +359,7 @@ module.exports = async function handler(req, res) {
         });
 
     } catch (error) {
-        console.error('Erro no handler:', error);
         if (browser) await browser.close();
-        return res.status(500).json({ error: error.message || 'Erro interno', stack: error.stack });
+        return res.status(500).json({ error: error.message || 'Erro interno' });
     }
 };
