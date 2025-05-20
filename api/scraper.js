@@ -176,6 +176,8 @@ module.exports = async function handler(req, res) {
             let avaliacoes = [];
             let nomeDisciplinaAtual = '';
 
+            console.log(`[${i + 1}/${disciplinasCodigos.length}] Acessando disciplina: ${disciplinasCodigos[i].nome}`);
+
             try {
                 if (i !== 0) {
                     const nomeAnterior = limparNomeDisciplina(
