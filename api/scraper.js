@@ -168,199 +168,215 @@ module.exports = async function handler(req, res) {
                         pageDisciplina.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
                     ]);
 
+                    // Agora siga o fluxo normal, mas usando pageDisciplina em vez de page
+                    // Exemplo:
                     await pageDisciplina.goto('https://sig.cefetmg.br/sigaa/portais/discente/discente.jsf', {
                         waitUntil: 'domcontentloaded',
                         timeout: 15000,
                     });
 
-                    // --- DECLARE AS VARIÁVEIS AQUI ---
-                    let avisos = [];
-                    let frequencia = [];
-                    let numeroAulasDefinidas = null;
-                    let porcentagemFrequencia = null;
-                    let notasHeaders = [];
-                    let notas = [];
-                    let avaliacoes = [];
+                    const xpath = `//form[contains(@id,"form_acessarTurmaVirtual")]//a[normalize-space(text())="${disciplina.disciplina}"]`;                const linkHandle = await pageDisciplina.evaluateHandle((xpath) => {
+                        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                        return result.singleNodeValue;
+                    }, xpath);
 
-                    // Coleta avisos
-                    avisos = await pageDisciplina.$$eval('.menu-direita > li', items => {
-                        return items.map(li => ({
-                            data: li.querySelector('.data')?.innerText.trim(),
-                            descricao: li.querySelector('.descricao')?.innerText.trim()
-                        }));
-                    });
+                    if (linkHandle) {
+                        console.log(`[${disciplina.disciplina}] Link encontrado, tentando entrar na página da matéria...`);
+                        await Promise.all([
+                            linkHandle.click(),
+                            pageDisciplina.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
+                        ]);
+                        console.log(`[${disciplina.disciplina}] Entrou na página da matéria com sucesso!`);
 
-                    console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
+                        await pageDisciplina.waitForSelector('.menu-direita', { timeout: 7000 });
 
-                    // Busca o elemento <a> do menu "Frequência" e extrai o parâmetro dinâmico do onclick
-                    const frequenciaInfo = await pageDisciplina.evaluate(() => {
-                        const a = Array.from(document.querySelectorAll('a')).find(a =>
-                            a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
-                        );
-                        if (!a) return null;
-                        const onclick = a.getAttribute('onclick');
-                        // Extrai o parâmetro dinâmico do jsfcljs
-                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
-                        console.log('onclick:', onclick);
-                        return match ? match[1] : null;
-                    });
+                        // Coleta avisos
+                        const avisos = await pageDisciplina.$$eval('.menu-direita > li', items => {
+                            return items.map(li => ({
+                                data: li.querySelector('.data')?.innerText.trim(),
+                                descricao: li.querySelector('.descricao')?.innerText.trim()
+                            }));
+                        });
 
-                    if (!frequenciaInfo) {
-                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Frequência'.");
-                    }
+                        console.log(`[${disciplina.disciplina}] Procurando link 'Frequência' no menu...`);
 
-                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Frequência':`, frequenciaInfo);
-
-                    // Agora chama jsfcljs usando o código dinâmico encontrado
-                    await pageDisciplina.evaluate((codigo) => {
-                        if (typeof jsfcljs === 'function') {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                { [codigo]: codigo },
-                                ''
+                        // Busca o elemento <a> do menu "Frequência" e extrai o parâmetro dinâmico do onclick
+                        const frequenciaInfo = await pageDisciplina.evaluate(() => {
+                            const a = Array.from(document.querySelectorAll('a')).find(a =>
+                                a.querySelector('.itemMenu')?.innerText.trim() === 'Frequência'
                             );
+                            if (!a) return null;
+                            const onclick = a.getAttribute('onclick');
+                            // Extrai o parâmetro dinâmico do jsfcljs
+                            const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                            console.log('onclick:', onclick);
+                            return match ? match[1] : null;
+                        });
+
+                        if (!frequenciaInfo) {
+                            throw new Error("Não foi possível encontrar o código dinâmico do menu 'Frequência'.");
                         }
-                    }, frequenciaInfo);
 
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
+                        console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Frequência':`, frequenciaInfo);
 
-                    // Aguarda o fieldset aparecer (onde pode estar a mensagem ou a tabela)
-                    await pageDisciplina.waitForSelector('fieldset', { timeout: 7000 });
+                        // Agora chama jsfcljs usando o código dinâmico encontrado
+                        await pageDisciplina.evaluate((codigo) => {
+                            if (typeof jsfcljs === 'function') {
+                                jsfcljs(
+                                    document.getElementById('formMenu'),
+                                    { [codigo]: codigo },
+                                    ''
+                                );
+                            }
+                        }, frequenciaInfo);
 
-                    // Verifica se existe a mensagem de frequência não lançada
-                    const frequenciaNaoLancada = await pageDisciplina.evaluate(() => {
-                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
-                            el.innerText.includes('A frequência ainda não foi lançada.')
+                        console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico, aguardando mudança na página...`);
+
+                        // Aguarda o fieldset aparecer (onde pode estar a mensagem ou a tabela)
+                        await pageDisciplina.waitForSelector('fieldset', { timeout: 7000 });
+
+                        // Verifica se existe a mensagem de frequência não lançada
+                        const frequenciaNaoLancada = await pageDisciplina.evaluate(() => {
+                            const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
+                                el.innerText.includes('A frequência ainda não foi lançada.')
+                            );
+                            return !!span;
+                        });
+
+                        if (frequenciaNaoLancada) {
+                            console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
+                            // ...existing code...
+                            disciplinasComAvisos.push({
+                                ...JSON.parse(JSON.stringify(disciplina)), // cópia profunda
+                                avisos: avisos ? JSON.parse(JSON.stringify(avisos)) : [],
+                                frequencia: frequencia ? JSON.parse(JSON.stringify(frequencia)) : [],
+                                numeroAulasDefinidas,
+                                porcentagemFrequencia,
+                                notas: {
+                                    headers: notasHeaders ? [...notasHeaders] : [],
+                                    valores: notas ? JSON.parse(JSON.stringify(notas)) : [],
+                                    avaliacoes: avaliacoes ? JSON.parse(JSON.stringify(avaliacoes)) : []
+                                }
+                            });
+                            // ...existing code...
+                            return; // Pula para a próxima disciplina
+                        }
+
+                        // Se não encontrou a mensagem, aguarda a tabela normalmente
+                        await pageDisciplina.waitForSelector('fieldset > table', { timeout: 15000 });
+                        console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
+
+                        // Coleta a tabela de frequência
+                        console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
+                        const frequencia = await pageDisciplina.$$eval(
+                            'fieldset > table > tbody tr',
+                            rows => rows.map(tr => {
+                                const tds = tr.querySelectorAll('td');
+                                return {
+                                    data: tds[0]?.innerText.trim(),
+                                    status: tds[1]?.innerText.trim()
+                            };
+                            })
                         );
-                        return !!span;
-                    });
+                        console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
 
-                    if (frequenciaNaoLancada) {
-                        console.log(`[${disciplina.disciplina}] Frequência ainda não foi lançada.`);
+                        // Coleta o número de aulas definidas pela CH do componente
+                        const numeroAulasDefinidas = await pageDisciplina.$eval('.botoes-show', el => {
+                            const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
+                            return match ? parseInt(match[1], 10) : null;
+                        });
+                        console.log(`[${disciplina.disciplina}] Número de aulas definidas:`, numeroAulasDefinidas);
+
+                        // (Opcional) Coleta a porcentagem de frequência
+                        const porcentagemFrequencia = await pageDisciplina.$eval('.botoes-show', el => {
+                            const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
+                            return match ? parseInt(match[1], 10) : null;
+                        });
+                        console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
+
+                        // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
+                        const notasInfo = await pageDisciplina.evaluate(() => {
+                            const a = Array.from(document.querySelectorAll('a')).find(a =>
+                                a.querySelector('.itemMenu')?.innerText.trim() === 'Ver Notas'
+                            );
+                            if (!a) return null;
+                            const onclick = a.getAttribute('onclick');
+                            // Extrai o parâmetro dinâmico do jsfcljs
+                            const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
+                            return match ? match[1] : null;
+                        });
+                        
+                        if (!notasInfo) {
+                            throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
+                        }
+                        
+                        console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
+                        
+                        // Agora chama jsfcljs usando o código dinâmico encontrado
+                        
+                        await pageDisciplina.evaluate((codigo) => {
+                            console.log('Chamando jsfcljs com código dinâmico para Notas:', codigo);
+                            if (typeof jsfcljs === 'function') {
+                                jsfcljs(
+                                    document.getElementById('formMenu'),
+                                    { [codigo]: codigo },
+                                    ''
+                                );
+                            }
+                        }, notasInfo);
+                        
+                        
+                        console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
+                        // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
+                        let notasHeaders = [];
+                        let notas = [];
+                        let avaliacoes = [];
+                        try {
+                            await pageDisciplina.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
+                            console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
+                        }
+
+                        // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
+                        try {
+                            notasHeaders = await pageDisciplina.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
+                                ths.map(th => th.innerText.trim()).filter(Boolean)
+                            );
+                            notas = await pageDisciplina.$$eval('table.tabelaRelatorio tbody tr', rows =>
+                                rows.map(tr => {
+                                    const tds = Array.from(tr.querySelectorAll('td'));
+                                    return tds.map(td => td.innerText.trim());
+                                })
+                            );
+                            // Captura nota, peso e den dos inputs escondidos do tr#trAval
+                            avaliacoes = await pageDisciplina.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
+                                ths.map(th => {
+                                    const id = th.id.replace('aval_', '');
+                                    const abrev = document.getElementById('abrevAval_' + id)?.value || '';
+                                    const den = document.getElementById('denAval_' + id)?.value || '';
+                                    const nota = document.getElementById('notaAval_' + id)?.value || '';
+                                    const peso = document.getElementById('pesoAval_' + id)?.value || '';
+                                    return { abrev, den, nota, peso };
+                                })
+                            );
+                            console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
+                        } catch (e) {
+                            console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
+                        }
+
+                        // Adicione o resultado ao array
+                        // ...existing code...
                         disciplinasComAvisos.push({
-                            ...disciplina,
-                            avisos,
+                            ...JSON.parse(JSON.stringify(disciplina)),
+                            avisos: avisos ? JSON.parse(JSON.stringify(avisos)) : [],
                             frequencia: [],
                             numeroAulasDefinidas: null,
                             porcentagemFrequencia: null,
                             mensagem: 'A frequência ainda não foi lançada.'
                         });
-                        return; // Pula para a próxima disciplina
+                        // ...existing code...
                     }
-
-                    // Se não encontrou a mensagem, aguarda a tabela normalmente
-                    await pageDisciplina.waitForSelector('fieldset > table', { timeout: 15000 });
-                    console.log(`[${disciplina.disciplina}] Tabela de frequência visível!`);
-
-                    // Coleta a tabela de frequência
-                    console.log(`[${disciplina.disciplina}] Coletando tabela de frequência...`);
-                    frequencia = await pageDisciplina.$$eval(
-                        'fieldset > table > tbody tr',
-                        rows => rows.map(tr => {
-                            const tds = tr.querySelectorAll('td');
-                            return {
-                                data: tds[0]?.innerText.trim(),
-                                status: tds[1]?.innerText.trim()
-                            };
-                            })
-                    );
-                    console.log(`[${disciplina.disciplina}] Frequência coletada:`, frequencia);
-
-                    // Coleta o número de aulas definidas pela CH do componente
-                    numeroAulasDefinidas = await pageDisciplina.$eval('.botoes-show', el => {
-                        const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
-                        return match ? parseInt(match[1], 10) : null;
-                    });
-                    console.log(`[${disciplina.disciplina}] Número de aulas definidas:`, numeroAulasDefinidas);
-
-                    // (Opcional) Coleta a porcentagem de frequência
-                    porcentagemFrequencia = await pageDisciplina.$eval('.botoes-show', el => {
-                        const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
-                        return match ? parseInt(match[1], 10) : null;
-                    });
-                    console.log(`[${disciplina.disciplina}] Porcentagem de frequência:`, porcentagemFrequencia);
-
-                    // Busca o elemento <a> do menu "Ver Notas" e extrai o parâmetro dinâmico do onclick
-                    const notasInfo = await pageDisciplina.evaluate(() => {
-                        const a = Array.from(document.querySelectorAll('a')).find(a =>
-                            a.querySelector('.itemMenu')?.innerText.trim() === 'Ver Notas'
-                        );
-                        if (!a) return null;
-                        const onclick = a.getAttribute('onclick');
-                        // Extrai o parâmetro dinâmico do jsfcljs
-                        const match = onclick && onclick.match(/jsfcljs\(.*,\s*\{['"]([^'"]+)['"]:/);
-                        return match ? match[1] : null;
-                    });
-                    
-                    if (!notasInfo) {
-                        throw new Error("Não foi possível encontrar o código dinâmico do menu 'Ver Notas'.");
-                    }
-                    
-                    console.log(`[${disciplina.disciplina}] Código dinâmico do menu 'Notas':`, notasInfo);
-                    
-                    // Agora chama jsfcljs usando o código dinâmico encontrado
-                    
-                    await pageDisciplina.evaluate((codigo) => {
-                        console.log('Chamando jsfcljs com código dinâmico para Notas:', codigo);
-                        if (typeof jsfcljs === 'function') {
-                            jsfcljs(
-                                document.getElementById('formMenu'),
-                                { [codigo]: codigo },
-                                ''
-                            );
-                        }
-                    }, notasInfo);
-                    
-                    
-                    console.log(`[${disciplina.disciplina}] jsfcljs chamado com código dinâmico para 'Notas', aguardando mudança na página...`);
-                    // Aguarda a tabela de notas aparecer, mas tenta processar mesmo se não aparecer
-                    try {
-                        await pageDisciplina.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                        console.log(`[${disciplina.disciplina}] Tabela de notas visível!`);
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Tabela de notas não visível dentro do tempo limite.`);
-                    }
-
-                    // Tenta extrair os dados da tabela de notas, mesmo que não tenha sido encontrada
-                    try {
-                        notasHeaders = await pageDisciplina.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                            ths.map(th => th.innerText.trim()).filter(Boolean)
-                        );
-                        notas = await pageDisciplina.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                            rows.map(tr => {
-                                const tds = Array.from(tr.querySelectorAll('td'));
-                                return tds.map(td => td.innerText.trim());
-                            })
-                        );
-                        // Captura nota, peso e den dos inputs escondidos do tr#trAval
-                        avaliacoes = await pageDisciplina.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
-                            ths.map(th => {
-                                const id = th.id.replace('aval_', '');
-                                const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                                const den = document.getElementById('denAval_' + id)?.value || '';
-                                const nota = document.getElementById('notaAval_' + id)?.value || '';
-                                const peso = document.getElementById('pesoAval_' + id)?.value || '';
-                                return { abrev, den, nota, peso };
-                            })
-                        );
-                        console.log(`[${disciplina.disciplina}] Notas coletadas:`, { headers: notasHeaders, notas, avaliacoes });
-                    } catch (e) {
-                        console.warn(`[${disciplina.disciplina}] Falha ao coletar dados da tabela de notas:`, e.message);
-                    }
-
-                    // Adicione o resultado ao array
-                    disciplinasComAvisos.push({
-                        ...disciplina,
-                        avisos,
-                        frequencia,
-                        numeroAulasDefinidas,
-                        porcentagemFrequencia,
-                        notas: {
-                            headers: notasHeaders,
-                            valores: notas,
-                            avaliacoes // Inclui os detalhes das avaliações
-                        }
-                    });
                 } catch (e) {
                     console.warn(`Erro ao processar ${disciplina.disciplina}:`, e.message);
                     disciplinasComAvisos.push({ ...disciplina, avisos: [], frequencia: [], erro: e.message });
