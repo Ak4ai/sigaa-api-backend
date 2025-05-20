@@ -202,6 +202,9 @@ module.exports = async function handler(req, res) {
                     const nomeAnterior = limparNomeDisciplina(
                         await page.$eval('#linkNomeTurma', el => el.innerText.trim())
                     );
+                    console.log(`[DEBUG] Nome anterior no DOM: "${nomeAnterior}"`);
+                    console.log(`[DEBUG] Nome esperado para a próxima disciplina: "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
+
                     await page.evaluate(({ codigo, frontEndIdTurma }) => {
                         if (typeof jsfcljs === 'function') {
                             const params = {};
@@ -215,19 +218,28 @@ module.exports = async function handler(req, res) {
                         }
                     }, { codigo: disciplinasCodigos[i].codigo, frontEndIdTurma: disciplinasCodigos[i].frontEndIdTurma });
 
-                    // Aguarda até que o nome LIMPO da disciplina no DOM seja igual ao nome LIMPO da disciplina atual
+                    console.log(`[DEBUG] Aguardando atualização do nome da disciplina no DOM...`);
                     await page.waitForFunction(
                         (nomeEsperado, limparNomeDisciplinaStr) => {
                             const limparNomeDisciplina = new Function('nomeCompleto', limparNomeDisciplinaStr);
                             const el = document.querySelector('#linkNomeTurma');
-                            if (!el) return false;
+                            if (!el) {
+                                window._sigaaDebugLastNome = '[Elemento não encontrado]';
+                                return false;
+                            }
                             const nomeAtual = limparNomeDisciplina(el.innerText.trim());
+                            window._sigaaDebugLastNome = nomeAtual;
                             return nomeAtual === nomeEsperado;
                         },
                         { timeout: 15000 },
                         limparNomeDisciplina(disciplinasCodigos[i].nome),
                         limparNomeDisciplina.toString()
                     );
+
+                    // Após o waitForFunction, logue o último nome encontrado no DOM
+                    const nomeAchado = await page.evaluate(() => window._sigaaDebugLastNome);
+                    console.log(`[DEBUG] Nome encontrado no DOM após troca: "${nomeAchado}"`);
+                    console.log(`[DEBUG] Comparação: "${nomeAchado}" === "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
 
                     console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Aguardando menu-direita`);
                     await page.waitForSelector('.menu-direita', { timeout: 15000 });
