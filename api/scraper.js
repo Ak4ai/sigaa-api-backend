@@ -156,6 +156,16 @@ module.exports = async function handler(req, res) {
 
         console.log('Disciplinas encontradas:', disciplinasCodigos);
 
+        // Função para limpar o nome da disciplina
+        function limparNomeDisciplina(nomeCompleto) {
+            // Remove código do início e semestre/fim do final
+            // Exemplo: 'G05BDAD1.02 - BANCO DE DADOS I (60h) (2025.1)' => 'BANCO DE DADOS I'
+            return nomeCompleto
+                .replace(/^[^-\–]+[-\–]\s*/, '') // Remove código e traço do início
+                .replace(/\s*\(\d+h\)\s*\(\d{4}\.\d\)$/i, '') // Remove (60h) (2025.1) do final
+                .trim();
+        }
+
         for (let i = 0; i < disciplinasCodigos.length; i++) {
             let avisos = [];
             let frequencia = [];
@@ -168,7 +178,11 @@ module.exports = async function handler(req, res) {
 
             try {
                 if (i !== 0) {
-                    console.log(`[${disciplinasCodigos[i].nome}] Trocando para disciplina via jsfcljs`);
+                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Trocando para disciplina via jsfcljs`);
+                    // Salva o nome anterior (limpo)
+                    const nomeAnterior = limparNomeDisciplina(
+                        await page.$eval('#linkNomeTurma', el => el.innerText.trim())
+                    );
                     await page.evaluate(({ codigo, frontEndIdTurma }) => {
                         if (typeof jsfcljs === 'function') {
                             jsfcljs(
@@ -179,19 +193,37 @@ module.exports = async function handler(req, res) {
                         }
                     }, { codigo: disciplinasCodigos[i].codigo, frontEndIdTurma: disciplinasCodigos[i].frontEndIdTurma });
 
-                    console.log(`[${disciplinasCodigos[i].nome}] Aguardando menu-direita`);
+                    // Aguarda até que o nome da disciplina mude no DOM (limpando para comparar)
+                    await page.waitForFunction(
+                        (nomeAnterior, limparNomeDisciplinaStr) => {
+                            const limparNomeDisciplina = new Function('nomeCompleto', limparNomeDisciplinaStr);
+                            const el = document.querySelector('#linkNomeTurma');
+                            if (!el) return false;
+                            const nomeAtual = limparNomeDisciplina(el.innerText.trim());
+                            return nomeAtual !== nomeAnterior;
+                        },
+                        { timeout: 15000 },
+                        nomeAnterior,
+                        limparNomeDisciplina.toString()
+                    );
+
+                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Aguardando menu-direita`);
                     await page.waitForSelector('.menu-direita', { timeout: 15000 });
                 }
 
                 try {
-                    nomeDisciplinaAtual = await page.$eval('#linkNomeTurma', el => el.innerText.trim());
+                    nomeDisciplinaAtual = limparNomeDisciplina(
+                        await page.$eval('#linkNomeTurma', el => el.innerText.trim())
+                    );
                     console.log(`[${nomeDisciplinaAtual}] Nome da disciplina acessada`);
                 } catch {
                     try {
-                        nomeDisciplinaAtual = await page.$eval('.descricao-disciplina, .disciplina, .titulo-disciplina, .subtitulo', el => el.innerText.trim());
+                        nomeDisciplinaAtual = limparNomeDisciplina(
+                            await page.$eval('.descricao-disciplina, .disciplina, .titulo-disciplina, .subtitulo', el => el.innerText.trim())
+                        );
                     } catch {
                         // fallback para o nome salvo no array, se não encontrar no DOM
-                        nomeDisciplinaAtual = disciplinasCodigos[i].nome;
+                        nomeDisciplinaAtual = limparNomeDisciplina(disciplinasCodigos[i].nome);
                     }
                 }
 
