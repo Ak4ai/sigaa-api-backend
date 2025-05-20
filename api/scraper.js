@@ -38,7 +38,7 @@ module.exports = async function handler(req, res) {
     try {
         cluster = await Cluster.launch({
             concurrency: Cluster.CONCURRENCY_CONTEXT,
-            maxConcurrency: 4, // Ajuste conforme recursos do servidor
+            maxConcurrency: 2, // Ajuste conforme recursos do servidor
             puppeteerOptions: isDev
                 ? {
                       executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
