@@ -7,14 +7,7 @@ const { validarTokenLogin } = require('./auth');
 const { Sema } = require('async-sema');
 const sema = new Sema(2); // Limite de 2 tarefas
 
-await Promise.all(schedule.map(async disciplina => {
-    await sema.acquire();
-    try {
-        // ...processa a disciplina...
-    } finally {
-        sema.release();
-    }
-}));
+
 
 
 module.exports = async function handler(req, res) {
@@ -23,7 +16,14 @@ module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    const PQueue = (await import('p-queue')).default;
+    await Promise.all(schedule.map(async disciplina => {
+        await sema.acquire();
+        try {
+            // ...processa a disciplina...
+        } finally {
+            sema.release();
+        }
+    }));
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
