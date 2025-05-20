@@ -187,6 +187,18 @@ module.exports = async function handler(req, res) {
 
             try {
                 if (i !== 0) {
+                    // Verifica e loga o conteúdo do legend antes de trocar de disciplina
+                    const legendText = await page.$eval(
+                        '#j_id_jsp_122142787_297 > fieldset > legend',
+                        el => el.innerText.trim()
+                    );
+                    console.log(`[DEBUG] Legend atual antes de trocar disciplina: "${legendText}"`);
+
+                    if (legendText !== 'Mapa de Frequências') {
+                        console.log('[DEBUG] Atenção: a aba atual não é "Mapa de Frequências"!');
+                    }
+
+                    // ...troca de disciplina...
                     const nomeAnterior = limparNomeDisciplina(
                         await page.$eval('#linkNomeTurma', el => el.innerText.trim())
                     );
@@ -438,15 +450,16 @@ module.exports = async function handler(req, res) {
 
                 // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
                 console.log(`[${nomeDisciplinaAtual}] Voltando para tela de disciplinas`);
-                await page.goBack();
+                //await page.goBack();
 
-            } catch (e) {
+            } 
+            catch (e) {
                 console.log(`[${nomeDisciplinaAtual}] Erro geral: ${e.message}`);
                 disciplinasComAvisos.push({ disciplina: nomeDisciplinaAtual, ...disciplinasCodigos[i], avisos: [], frequencia: [], erro: e.message });
                 // Se der erro na página de notas, tente voltar para a tela de disciplinas
                 try { 
                     console.log(`[${nomeDisciplinaAtual}] Tentando voltar para tela de disciplinas após erro`);
-                    await page.goBack(); 
+                    //await page.goBack(); 
                 } catch {}
             }
         }
