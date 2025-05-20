@@ -3,8 +3,9 @@ const puppeteer = require('puppeteer-core');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
-const PQueue = require('p-queue').default;
-
+// ...existing code...
+const PQueue = (await import('p-queue')).default;
+// ...existing code...
 module.exports = async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
