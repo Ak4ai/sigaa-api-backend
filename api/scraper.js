@@ -185,9 +185,12 @@ module.exports = async function handler(req, res) {
                     );
                     await page.evaluate(({ codigo, frontEndIdTurma }) => {
                         if (typeof jsfcljs === 'function') {
+                            const params = {};
+                            params[codigo] = codigo;
+                            params['frontEndIdTurma'] = frontEndIdTurma;
                             jsfcljs(
                                 document.getElementById('formTurma'),
-                                { [codigo]: codigo, frontEndIdTurma },
+                                params,
                                 ''
                             );
                         }
