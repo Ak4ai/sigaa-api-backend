@@ -59,7 +59,7 @@ module.exports = async function handler(req, res) {
                       executablePath: await chromium.executablePath(),
                       headless: chromium.headless,
                   }
-        );
+        });
 
         // Login e coleta de dados institucionais e schedule (apenas uma vez)
         const { dadosInstitucionais, schedule, detailedSchedule, simplifiedSchedule } = await (async () => {
