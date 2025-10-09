@@ -39,7 +39,7 @@ module.exports = async function handler(req, res) {
             isDev
                 ? {
                       executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                      headless: true,
+                      headless: false, // Alterado para false para depuração local
                       args: ['--no-sandbox', '--disable-setuid-sandbox'],
                   }
                 : {
@@ -224,8 +224,9 @@ module.exports = async function handler(req, res) {
                     console.log(`[DEBUG] Nome encontrado no DOM após troca: "${nomeAchado}"`);
                     console.log(`[DEBUG] Comparação: "${nomeAchado}" === "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
 
-                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Aguardando menu-direita`);
-                    await page.waitForSelector('.menu-direita', { timeout: 15000 });
+                    // A espera pelo '.menu-direita' foi removida.
+                    // O seletor é opcional e o código de coleta de avisos abaixo já lida com a ausência dele.
+                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Página da disciplina carregada.`);
                 }
 
                 try {
