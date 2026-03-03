@@ -23,7 +23,7 @@ app.use(express.json());
 app.all('/api/login', (req, res) => loginHandler(req, res));
 
 // Rota de scraper
-app.post('/api/scraper', async (req, res) => {
+app.all('/api/scraper', async (req, res) => {
     console.log('Recebida requisição para /api/scraper');
     try {
         await scraperHandler(req, res);
