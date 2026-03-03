@@ -85,6 +85,8 @@ app.get('/api/queue-status', (req, res) => {
         }
     }
 
+    console.log(`[FILA-STATUS] clientId=${clientId}, position=${position}, queue=${scraperQueue.length}, busy=${isScraperBusy}, currentClientId=${currentClientId}`);
+
     res.json({
         position,
         queueLength: scraperQueue.length,
@@ -106,7 +108,7 @@ app.all('/api/scraper', async (req, res) => {
 
     res.setHeader('X-Queue-Id', String(queueId));
 
-    console.log(`[FILA] Job #${queueId} enfileirado (posição ${position + 1}, fila: ${scraperQueue.length + 1})`);
+    console.log(`[FILA] Job #${queueId} (clientId: ${clientId}) enfileirado (posição ${position + 1}, fila: ${scraperQueue.length + 1})`);
 
     // Enfileira e aguarda sua vez
     await new Promise((resolve, reject) => {
