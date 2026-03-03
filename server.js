@@ -16,6 +16,17 @@ const FRONTEND_DIR = path.resolve(
     '../teste_api_sigaa/sigaa-test/Sigaa-API-webapp'
 );
 
+// CORS global — deve vir ANTES de qualquer outro middleware
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
+
 // Middleware para parsear JSON
 app.use(express.json());
 
