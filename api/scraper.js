@@ -32,33 +32,60 @@ module.exports = async function handler(req, res) {
     }
 
     let browser;
-    const isDev = process.env.NODE_ENV === 'development';
+    // NODE_ENV=development  → Windows local (Chrome visível)
+    // NODE_ENV=vps          → Linux VPS (Oracle, DigitalOcean) com Chrome instalado via apt
+    // NODE_ENV=production   → Vercel serverless com @sparticuz/chromium
+    const env = process.env.NODE_ENV || 'production';
+
+    // Permite sobrescrever o caminho do Chrome via variável de ambiente
+    const CHROME_PATHS = {
+        win32:  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        linux:  process.env.CHROME_PATH ||
+                ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome']
+                    .find(p => { try { require('fs').accessSync(p); return true; } catch { return false; } })
+                || '/usr/bin/chromium-browser',
+    };
+
+    const commonArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-extensions',
+        '--hide-scrollbars',
+        '--mute-audio',
+        '--window-size=1024,768',
+    ];
 
     try {
-        browser = await puppeteer.launch(
-            isDev
-                ? {
-                      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                      headless: true,
-                      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                  }
-                : {
-                      args: [
-                          ...chromium.args,
-                          '--no-sandbox',
-                          '--disable-setuid-sandbox',
-                          '--disable-dev-shm-usage',
-                          '--disable-gpu',
-                          '--disable-extensions',
-                          '--hide-scrollbars',
-                          '--mute-audio',
-                          '--window-size=1024,768'
-                      ],
-                      executablePath: await chromium.executablePath(),
-                      headless: chromium.headless,
-                      defaultViewport: chromium.defaultViewport,
-                  }
-        );
+        let launchOptions;
+
+        if (env === 'development') {
+            // Windows local — Chrome visível para depuração
+            launchOptions = {
+                executablePath: CHROME_PATHS.win32,
+                headless: false,
+                args: commonArgs,
+            };
+        } else if (env === 'vps') {
+            // Linux VPS (Oracle Cloud, DigitalOcean, Railway, etc.)
+            launchOptions = {
+                executablePath: CHROME_PATHS.linux,
+                headless: true,
+                args: commonArgs,
+            };
+        } else {
+            // Vercel serverless — usa @sparticuz/chromium
+            launchOptions = {
+                args: [...chromium.args, ...commonArgs],
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                defaultViewport: chromium.defaultViewport,
+            };
+        }
+
+        console.log(`[Puppeteer] ENV=${env} | executablePath=${launchOptions.executablePath}`);
+        browser = await puppeteer.launch(launchOptions);
 
         // Cria apenas UMA aba para todas as disciplinas
         const page = await browser.newPage();
