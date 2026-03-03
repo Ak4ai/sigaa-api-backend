@@ -39,22 +39,24 @@ module.exports = async function handler(req, res) {
             isDev
                 ? {
                       executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                      headless: false, // Alterado para false para depuração local
+                      headless: true,
                       args: ['--no-sandbox', '--disable-setuid-sandbox'],
                   }
                 : {
                       args: [
+                          ...chromium.args,
                           '--no-sandbox',
                           '--disable-setuid-sandbox',
                           '--disable-dev-shm-usage',
                           '--disable-gpu',
-                          '--single-process',
                           '--disable-extensions',
-                          '--disable-infobars',
+                          '--hide-scrollbars',
+                          '--mute-audio',
                           '--window-size=1024,768'
                       ],
                       executablePath: await chromium.executablePath(),
                       headless: chromium.headless,
+                      defaultViewport: chromium.defaultViewport,
                   }
         );
 
@@ -473,6 +475,26 @@ module.exports = async function handler(req, res) {
 
     } catch (error) {
         if (browser) await browser.close();
-        return res.status(500).json({ error: error.message || 'Erro interno' });
+
+        let mensagem = error.message || 'Erro interno';
+
+        // Erro de timeout de rede — típico quando o servidor bloqueia IPs de nuvem
+        if (
+            mensagem.includes('ERR_CONNECTION_TIMED_OUT') ||
+            mensagem.includes('net::ERR_') ||
+            mensagem.includes('TimeoutError') ||
+            mensagem.includes('Navigation timeout')
+        ) {
+            mensagem =
+                'Não foi possível conectar ao SIGAA. ' +
+                'O servidor sig.cefetmg.br bloqueou a conexão vinda desta plataforma de hospedagem (IP de nuvem). ' +
+                'Isso é uma restrição do servidor do SIGAA, não um erro no código. ' +
+                'Para resolver, hospede o backend em um servidor com IP residencial ou em uma VPS brasileira.';
+            console.error('[SIGAA] Bloqueio de IP / timeout de rede:', error.message);
+            return res.status(503).json({ error: mensagem });
+        }
+
+        console.error('[SIGAA] Erro interno:', error.message);
+        return res.status(500).json({ error: mensagem });
     }
 };

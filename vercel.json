@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "api/login.js": {
+      "maxDuration": 30
+    },
+    "api/scraper.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    }
+  }
+}
