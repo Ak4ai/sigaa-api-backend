@@ -34,6 +34,7 @@ app.use(express.json());
 const scraperQueue = [];       // fila: [{ id, resolve, reject }]
 let isScraperBusy = false;     // mutex: alguém está fazendo scraping?
 let currentJobId = null;       // ID do job sendo processado agora
+let currentClientId = null;    // clientId do job sendo processado agora
 let queueIdCounter = 0;        // ID incremental
 const scrapeTimesMs = [];       // últimos N tempos de scraping para calcular média
 const MAX_TIMES_HISTORY = 20;
@@ -48,6 +49,7 @@ async function processQueue() {
     isScraperBusy = true;
     const job = scraperQueue.shift();
     currentJobId = job.id;
+    currentClientId = job.clientId || null;
     try {
         const startMs = Date.now();
         await job.run();
@@ -58,6 +60,7 @@ async function processQueue() {
         console.error('Erro no job da fila:', err);
     } finally {
         currentJobId = null;
+        currentClientId = null;
         isScraperBusy = false;
         processQueue(); // processa próximo
     }
@@ -65,21 +68,27 @@ async function processQueue() {
 
 // Endpoint para o frontend consultar posição na fila
 app.get('/api/queue-status', (req, res) => {
-    const queueId = parseInt(req.query.id, 10);
-    let position = 0;
-    if (queueId > 0) {
-        const idx = scraperQueue.findIndex(j => j.id === queueId);
-        if (idx !== -1) {
-            position = idx + 1 + (isScraperBusy ? 1 : 0); // +1 por quem está processando
-        } else if (isScraperBusy && currentJobId === queueId) {
-            position = 0; // sendo processado agora
+    const clientId = req.query.clientId || '';
+    let position = -1; // -1 = não encontrado / entrando na fila
+
+    if (clientId) {
+        // Verifica se está sendo processado agora
+        if (isScraperBusy && currentClientId === clientId) {
+            position = 1; // está sendo processado
+        } else {
+            // Procura na fila de espera
+            const idx = scraperQueue.findIndex(j => j.clientId === clientId);
+            if (idx !== -1) {
+                position = idx + 1 + (isScraperBusy ? 1 : 0); // +1 por quem está processando
+            }
+            // Se não achou, position = -1 (ainda não chegou ou já terminou)
         }
     }
+
     res.json({
         position,
         queueLength: scraperQueue.length,
         processing: isScraperBusy,
-        currentJobId: currentJobId || 0,
         avgTimeMs: getAvgScrapeTimeMs()
     });
 });
@@ -92,10 +101,9 @@ app.all('/api/scraper', async (req, res) => {
     if (req.method === 'OPTIONS') return res.status(200).end();
 
     const queueId = ++queueIdCounter;
+    const clientId = req.body.clientId || `auto-${queueId}`;
     const position = scraperQueue.length + (isScraperBusy ? 1 : 0);
 
-    // Se já tem alguém na fila ou processando, retorna posição para o front saber
-    // O header X-Queue-Id permite o front fazer polling com /api/queue-status
     res.setHeader('X-Queue-Id', String(queueId));
 
     console.log(`[FILA] Job #${queueId} enfileirado (posição ${position + 1}, fila: ${scraperQueue.length + 1})`);
@@ -104,6 +112,7 @@ app.all('/api/scraper', async (req, res) => {
     await new Promise((resolve, reject) => {
         scraperQueue.push({
             id: queueId,
+            clientId: clientId,
             run: async () => {
                 try {
                     console.log(`[FILA] Job #${queueId} iniciando scraping...`);
