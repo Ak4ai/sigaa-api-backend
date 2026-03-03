@@ -151,7 +151,8 @@ module.exports = async function handler(req, res) {
                     );
                     const turmaInfo = infos[0] || '';
                     const rawCodes = (infos[1] || '').split('(')[0].trim();
-                    data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes });
+                    const sala = (infos[2] || '').trim();
+                    data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes, sala });
                 }
             }
             return data;
