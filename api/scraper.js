@@ -139,7 +139,6 @@ module.exports = async function handler(req, res) {
 
         if (nomeUsuario) {
             dadosInstitucionais['Nome do Usuario'] = nomeUsuario;
-            dadosInstitucionais.nomeUsuario = nomeUsuario;
         }
 
         await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
