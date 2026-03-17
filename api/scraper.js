@@ -161,17 +161,7 @@ module.exports = async function handler(req, res) {
                     );
                     const turmaInfo = infos[0] || '';
                     const rawCodes = (infos[1] || '').split('(')[0].trim();
-                    
-                    // Extrai "Local: XXX" da coluna turmaInfo ou infos[2]
-                    let sala = '';
-                    const turmaText = turmaInfo + ' ' + (infos[2] || '');
-                    const localMatch = turmaText.match(/Local:\s*([^\n]+)/);
-                    if (localMatch) {
-                        sala = localMatch[1].trim();
-                    } else {
-                        sala = (infos[2] || '').trim();
-                    }
-                    
+                    const sala = (infos[2] || '').trim();
                     data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes, sala });
                 }
             }
