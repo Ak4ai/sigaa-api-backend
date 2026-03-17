@@ -131,6 +131,17 @@ module.exports = async function handler(req, res) {
             }
         );
 
+        // Nome do usuário no cabeçalho do SIGAA (ex.: #info-usuario > p.usuario > span)
+        const nomeUsuario = await page.$eval(
+            '#info-usuario > p.usuario > span',
+            el => el.textContent.trim()
+        ).catch(() => null);
+
+        if (nomeUsuario) {
+            dadosInstitucionais['Nome do Usuario'] = nomeUsuario;
+            dadosInstitucionais.nomeUsuario = nomeUsuario;
+        }
+
         await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
 
         const schedule = await page.$$eval('tbody tr', rows => {
