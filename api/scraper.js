@@ -1,25 +1,222 @@
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+// scraper.js — implementação axios+cheerio substituindo Puppeteer
+// Mantém exatamente o mesmo contrato de resposta JSON:
+// { dadosInstitucionais, horariosDetalhados, horariosSimplificados, avisosPorDisciplina }
+//
+// Fluxo:
+// 1. GET  /sigaa/logar.do?dispatch=logOff          → página de login
+// 2. POST /sigaa/logar.do?dispatch=logOn            → login
+// 3. GET  /sigaa/portais/discente/discente.jsf      → portal (67KB) → dadosInstitucionais, horarios, turmas
+// 4. Para cada turma:
+//    a. POST discente.jsf com idTurma               → AVA (94–129KB) → avisos, formMenuId, avaViewState
+//    b. POST /sigaa/ava/index.jsf  _95              → frequência → frequencia[], numeroAulasDefinidas, %
+//    c. POST /sigaa/ava/index.jsf  _97              → notas      → headers, notas, avaliacoes[]
+
+const axios = require('axios');
+const { CookieJar } = require('tough-cookie');
+const { load } = require('cheerio');
+const { URLSearchParams } = require('url');
+const https = require('https');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
-const { delay } = require('./constants');
 const { validarTokenLogin } = require('./auth');
 
+const BASE_URL = 'https://sig.cefetmg.br';
+
+const BASE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'pt-BR,pt;q=0.9',
+    'Content-Type': 'application/x-www-form-urlencoded',
+};
+
+// ── Helpers de extração ─────────────────────────────────────────────────────
+
+function extractHiddenFields(html) {
+    const $ = load(html);
+    const fields = {};
+    $('input[type="hidden"]').each((_, el) => {
+        const name = $(el).attr('name');
+        const value = $(el).attr('value') ?? '';
+        if (name) fields[name] = value;
+    });
+    return fields;
+}
+
+function decodeHtmlEntities(str) {
+    return load(`<x>${str}</x>`)('x').text();
+}
+
+function extractTurmas(html) {
+    const turmas = [];
+    const pattern = /'idTurma':'(\d+)'[^}]*}\s*,\s*''\s*\)\s*;\s*\}\s*return[^>]*>([^<]+)</g;
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+        turmas.push({ idTurma: match[1], nome: decodeHtmlEntities(match[2].trim()) });
+    }
+    const seen = new Set();
+    return turmas.filter(t => {
+        if (seen.has(t.idTurma)) return false;
+        seen.add(t.idTurma);
+        return true;
+    });
+}
+
+function extractFormAtualizacoesTurmasId(html) {
+    const match = html.match(/formAtualizacoesTurmas:(j_id_jsp_\d+_\d+)['":]/);
+    return match ? match[1] : null;
+}
+
+function extractFormMenuAvaId(html) {
+    const match = html.match(/id="formMenu:j_id_jsp_(\d+)_69"/);
+    if (match) return match[1];
+    const match2 = html.match(/formMenu:j_id_jsp_(\d+)_69/);
+    return match2 ? match2[1] : null;
+}
+
+// Extrai dadosInstitucionais de #agenda-docente e nome do usuário
+function parseDadosInstitucionais(html) {
+    const $ = load(html);
+    const obj = {};
+
+    $('#agenda-docente table tbody tr').each((_, row) => {
+        const cols = $(row).find('td');
+        if (cols.length === 2) {
+            const key = $(cols[0]).text().replace(':', '').trim();
+            const val = $(cols[1]).text().trim();
+            if (key) obj[key] = val;
+        }
+    });
+
+    const nomeUsuario = $('#info-usuario p.usuario span').first().text().trim();
+    if (nomeUsuario) obj['Nome do Usuario'] = nomeUsuario;
+
+    return obj;
+}
+
+// Extrai horários brutos para alimentar o scheduleParser (mesma estrutura que o Puppeteer produzia)
+function parseScheduleRaw(html) {
+    const $ = load(html);
+    const data = [];
+    let term = '';
+
+    $('tbody tr').each((_, row) => {
+        const $row = $(row);
+        const span = $row.find('td[colspan]');
+
+        if (span.length) {
+            term = span.text().trim();
+            return;
+        }
+
+        if ($row.find('form[id^="form_acessarTurmaVirtual"]').length) {
+            const desc = $row.find('td.descricao');
+            const name = desc.find('a').text().trim() || desc.text().trim();
+
+            const infos = $row.find('td.info').map((_, td) => $(td).text().trim()).get();
+            const turmaInfo = infos[0] || '';
+            const rawCodes = (infos[1] || '').split('(')[0].trim();
+            const sala = (infos[2] || '').trim();
+
+            data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes, sala });
+        }
+    });
+
+    return data;
+}
+
+// Extrai avisos do AVA (.menu-direita > li)
+function parseAvisos(html) {
+    const $ = load(html);
+    const avisos = [];
+    $('.menu-direita > li').each((_, li) => {
+        avisos.push({
+            data: $(li).find('.data').text().trim() || undefined,
+            descricao: $(li).find('.descricao').text().trim() || undefined,
+        });
+    });
+    return avisos;
+}
+
+// Extrai registros de frequência (tr.linhaImpar / tr.linhaPar com data DD/MM/YYYY)
+function parseFrequencia(html) {
+    const $ = load(html);
+    const registros = [];
+    $('tr.linhaImpar, tr.linhaPar').each((_, row) => {
+        const tds = $(row).find('td');
+        if (tds.length >= 2) {
+            const data = $(tds[0]).text().trim();
+            const status = $(tds[1]).text().trim();
+            if (/\d{2}\/\d{2}\/\d{4}/.test(data) && status.length > 0) {
+                registros.push({ data, status });
+            }
+        }
+    });
+    return registros;
+}
+
+// Extrai numeroAulasDefinidas e porcentagemFrequencia do bloco .botoes-show
+function parseFrequenciaStats(html) {
+    const $ = load(html);
+    const texto = $('.botoes-show').text();
+
+    const matchAulas = texto.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
+    const matchPct   = texto.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
+
+    return {
+        numeroAulasDefinidas: matchAulas ? parseInt(matchAulas[1], 10) : null,
+        porcentagemFrequencia: matchPct ? parseInt(matchPct[1], 10) : null,
+    };
+}
+
+// Extrai notas — mesma estrutura { headers, valores, avaliacoes } que o Puppeteer produzia
+function parseNotas(html) {
+    const $ = load(html);
+
+    // Verifica se a tabela de notas existe
+    if (!$('table.tabelaRelatorio').length) return null;
+
+    // Headers (abreviações das avaliações)
+    const headers = [];
+    $('table.tabelaRelatorio thead tr#trAval th').each((_, th) => {
+        const text = $(th).text().trim();
+        if (text) headers.push(text);
+    });
+
+    // Valores das linhas
+    const valores = [];
+    $('table.tabelaRelatorio tbody tr').each((_, row) => {
+        const tds = $(row).find('td').map((_, td) => $(td).text().trim()).get();
+        if (tds.length) valores.push(tds);
+    });
+
+    // Avaliações detalhadas (peso, nota máxima, abrev, denominação)
+    const avaliacoes = [];
+    $('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]').each((_, th) => {
+        const id = $(th).attr('id').replace('aval_', '');
+        const abrev = $(`#abrevAval_${id}`).val() || $(th).text().trim();
+        const den   = $(`#denAval_${id}`).val()   || abrev;
+        const nota  = $(`#notaAval_${id}`).val()  || '';
+        const peso  = $(`#pesoAval_${id}`).val()  || '';
+        avaliacoes.push({ abrev, den, nota, peso });
+    });
+
+    return { headers, valores, avaliacoes };
+}
+
+// ── Handler principal ───────────────────────────────────────────────────────
+
 module.exports = async function handler(req, res) {
-    // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
+    // Resolve credenciais (token JWT ou user/pass direto)
     let user, pass;
     if (req.body.token) {
         const payload = validarTokenLogin(req.body.token);
-        if (!payload) {
-            return res.status(401).json({ error: 'Token inválido ou expirado.' });
-        }
+        if (!payload) return res.status(401).json({ error: 'Token inválido ou expirado.' });
         user = payload.user;
         pass = payload.pass;
     } else {
@@ -27,512 +224,199 @@ module.exports = async function handler(req, res) {
         pass = req.body.pass;
     }
 
-    if (!user || !pass) {
-        return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
-    }
+    if (!user || !pass) return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
 
-    let browser;
-    // NODE_ENV=development  → Windows local (Chrome visível)
-    // NODE_ENV=vps          → Linux VPS (Oracle, DigitalOcean) com Chrome instalado via apt
-    // NODE_ENV=production   → Vercel serverless com @sparticuz/chromium
-    const env = process.env.NODE_ENV || 'production';
+    const jar = new CookieJar();
+    const client = axios.create({
+        baseURL: BASE_URL,
+        validateStatus: () => true,
+        decompress: true,
+        timeout: 30000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    });
 
-    // Permite sobrescrever o caminho do Chrome via variável de ambiente
-    const CHROME_PATHS = {
-        win32:  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        linux:  process.env.CHROME_PATH ||
-                ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome']
-                    .find(p => { try { require('fs').accessSync(p); return true; } catch { return false; } })
-                || '/usr/bin/chromium-browser',
-    };
-
-    const commonArgs = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--hide-scrollbars',
-        '--mute-audio',
-        '--window-size=1024,768',
-    ];
+    // Gerencia cookies manualmente via interceptors
+    client.interceptors.request.use(config => {
+        const url = (config.baseURL || BASE_URL) + (config.url || '');
+        const cookies = jar.getCookiesSync(url).map(c => c.cookieString()).join('; ');
+        if (cookies) config.headers['Cookie'] = cookies;
+        return config;
+    });
+    client.interceptors.response.use(response => {
+        const setCookies = response.headers['set-cookie'];
+        if (setCookies) {
+            const url = (response.config.baseURL || BASE_URL) + (response.config.url || '');
+            setCookies.forEach(cookie => { try { jar.setCookieSync(cookie, url); } catch {} });
+        }
+        return response;
+    });
 
     try {
-        let launchOptions;
+        // ── PASSO 1: Login ─────────────────────────────────────────────────
+        console.log('[scraper] Iniciando login...');
+        const loginPage = await client.get('/sigaa/logar.do?dispatch=logOff', { headers: BASE_HEADERS });
+        const loginFields = extractHiddenFields(loginPage.data);
 
-        if (env === 'development') {
-            // Windows local — Chrome visível para depuração
-            launchOptions = {
-                executablePath: CHROME_PATHS.win32,
-                headless: false,
-                args: commonArgs,
-            };
-        } else if (env === 'vps') {
-            // Linux VPS (Oracle Cloud, DigitalOcean, Railway, etc.)
-            launchOptions = {
-                executablePath: CHROME_PATHS.linux,
-                headless: true,
-                args: commonArgs,
-            };
-        } else {
-            // Vercel serverless — usa @sparticuz/chromium
-            launchOptions = {
-                args: [...chromium.args, ...commonArgs],
-                executablePath: await chromium.executablePath(),
-                headless: chromium.headless,
-                defaultViewport: chromium.defaultViewport,
-            };
-        }
-
-        console.log(`[Puppeteer] ENV=${env} | executablePath=${launchOptions.executablePath}`);
-        browser = await puppeteer.launch(launchOptions);
-
-        // Cria apenas UMA aba para todas as disciplinas
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1024, height: 600 });
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const type = req.resourceType();
-            if (['stylesheet', 'font', 'image', 'media', 'other'].includes(type)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
+        const loginParams = new URLSearchParams({
+            'user.login': user,
+            'user.senha': pass,
+            ...loginFields,
         });
+        const loginRes = await client.post('/sigaa/logar.do?dispatch=logOn', loginParams.toString(), { headers: BASE_HEADERS });
 
-        await page.goto('https://sig.cefetmg.br/sigaa/verTelaLogin.do', {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000,
-        });
-
-        await page.type('#conteudo input[type=text]', user);
-        await page.type('#conteudo input[type=password]', pass);
-
-        await Promise.all([
-            page.click('#conteudo input[type=submit]'),
-            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
-        ]);
-
-        await page.waitForSelector('#agenda-docente table tbody tr', { timeout: 10000 });
-
-        const dadosInstitucionais = await page.$$eval(
-            '#agenda-docente table tbody tr',
-            rows => {
-                const obj = {};
-                for (const row of rows) {
-                    const cols = Array.from(row.querySelectorAll('td'));
-                    if (cols.length === 2) {
-                        const key = cols[0].innerText.replace(':', '').trim();
-                        const val = cols[1].innerText.trim();
-                        obj[key] = val;
-                    }
-                }
-                return obj;
-            }
-        );
-
-        // Nome do usuário no cabeçalho do SIGAA (ex.: #info-usuario > p.usuario > span)
-        const nomeUsuario = await page.$eval(
-            '#info-usuario > p.usuario > span',
-            el => el.textContent.trim()
-        ).catch(() => null);
-
-        if (nomeUsuario) {
-            dadosInstitucionais['Nome do Usuario'] = nomeUsuario;
+        // Detecta login inválido: verifica mensagens de erro SIGAA na página resultante
+        // Não usar includes('logar.do') pois o portal também contém esse link (botão Sair)
+        const loginInvalido =
+            loginRes.data.includes('Usuário e/ou senha inválidos') ||
+            loginRes.data.includes('Dados incorretos') ||
+            loginRes.data.includes('Falha na autenticação') ||
+            (loginRes.data.includes('input[type=password]') && loginRes.data.includes('user.senha'));
+        if (loginInvalido) {
+            console.log('[scraper] Credenciais inválidas');
+            return res.status(401).json({ error: 'Usuário e/ou senha inválidos.' });
         }
+        console.log('[scraper] Login OK');
 
-        await page.waitForSelector('form[id^="form_acessarTurmaVirtual"]', { timeout: 15000 });
+        // ── PASSO 2: Portal discente ───────────────────────────────────────
+        console.log('[scraper] Carregando portal discente...');
+        const portalRes = await client.get('/sigaa/portais/discente/discente.jsf', { headers: BASE_HEADERS });
+        const portalHtml = portalRes.data;
 
-        const schedule = await page.$$eval('tbody tr', rows => {
-            let term = '';
-            const data = [];
-            for (const row of rows) {
-                const span = row.querySelector('td[colspan]');
-                if (span) {
-                    term = span.innerText.trim();
-                    continue;
-                }
+        const dadosInstitucionais = parseDadosInstitucionais(portalHtml);
+        const scheduleRaw         = parseScheduleRaw(portalHtml);
+        const horariosDetalhados  = interpretSchedule(scheduleRaw);
+        const horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+        const portalViewState     = extractHiddenFields(portalHtml)['javax.faces.ViewState'];
+        const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
+        const turmas              = extractTurmas(portalHtml);
 
-                if (row.querySelector('form[id^="form_acessarTurmaVirtual"]')) {
-                    const desc = row.querySelector('td.descricao');
-                    const name = desc.querySelector('a')?.innerText.trim() ?? desc.innerText.trim();
-                    const infos = Array.from(row.querySelectorAll('td.info')).map(td =>
-                        td.innerText.trim()
-                    );
-                    const turmaInfo = infos[0] || '';
-                    const rawCodes = (infos[1] || '').split('(')[0].trim();
-                    const sala = (infos[2] || '').trim();
-                    data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes, sala });
-                }
+        console.log(`[scraper] ${turmas.length} turma(s) encontrada(s)`);
+
+        // ── PASSO 3: Para cada turma ──────────────────────────────────────
+        const avisosPorDisciplina = [];
+
+        for (const turma of turmas) {
+            console.log(`[scraper] Turma: ${turma.nome} (${turma.idTurma})`);
+
+            // 3a: Entra no AVA
+            const avaPayload = new URLSearchParams();
+            avaPayload.set('formAtualizacoesTurmas', 'formAtualizacoesTurmas');
+            if (formAtuId) {
+                avaPayload.set(`formAtualizacoesTurmas:${formAtuId}`, `formAtualizacoesTurmas:${formAtuId}`);
             }
-            return data;
-        });
+            avaPayload.set('idTurma', turma.idTurma);
+            avaPayload.set('javax.faces.ViewState', portalViewState ?? 'j_id3');
 
-        console.time('total');
+            const avaRes = await client.post('/sigaa/portais/discente/discente.jsf', avaPayload.toString(), {
+                headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/portais/discente/discente.jsf` },
+            });
+            const avaHtml = avaRes.data;
 
-        const detailedSchedule = interpretSchedule(schedule);
-        const simplifiedSchedule = gerarTabelaSimplificada(detailedSchedule);
+            const avisos      = parseAvisos(avaHtml);
+            const avaMenuId   = extractFormMenuAvaId(avaHtml);
+            const avaViewState = extractHiddenFields(avaHtml)['javax.faces.ViewState'] ?? 'j_id3';
 
-        console.time('avisos');
-        const disciplinasComAvisos = [];
+            if (!avaMenuId) {
+                console.log(`[scraper]   formMenuId não encontrado, pulando...`);
+                avisosPorDisciplina.push({
+                    disciplina: turma.nome,
+                    idTurma: turma.idTurma,
+                    avisos,
+                    frequencia: [],
+                    numeroAulasDefinidas: null,
+                    porcentagemFrequencia: null,
+                    notas: { headers: [], valores: [], avaliacoes: [], mensagem: 'AVA não acessível.' },
+                });
+                continue;
+            }
 
-        // Após coletar o schedule, entre na primeira disciplina via menu principal
-        await page.click('#form_acessarTurmaVirtual > a');
-        await page.waitForSelector('#formTurma', { timeout: 15000 });
+            // 3b: Frequência
+            const freqPayload = new URLSearchParams();
+            freqPayload.set('formMenu', 'formMenu');
+            freqPayload.set(`formMenu:j_id_jsp_${avaMenuId}_69`, `formMenu:j_id_jsp_${avaMenuId}_92`);
+            freqPayload.set(`formMenu:j_id_jsp_${avaMenuId}_95`, `formMenu:j_id_jsp_${avaMenuId}_95`);
+            freqPayload.set('javax.faces.ViewState', avaViewState);
 
-        // Defina o prefixo fixo conforme o padrão desejado
-        const codigoPrefixo = 'formTurma:j_id_jsp_122142787_7';
+            const freqRes = await client.post('/sigaa/ava/index.jsf', freqPayload.toString(), {
+                headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
+            });
+            const freqHtml = freqRes.data;
 
-        // Coleta os códigos das disciplinas
-        const disciplinasCodigos = await page.$$eval('#formTurma a.linkTurma', (links, codigoPrefixo) =>
-            links.map((link, idx) => {
-                const onclick = link.getAttribute('onclick');
-                const matchFrontEnd = onclick.match(/'frontEndIdTurma':'([^']+)'/);
-                // Gera o código conforme o padrão fixo
-                let codigo = idx === 0
-                    ? codigoPrefixo
-                    : `${codigoPrefixo}j_id_${idx}`;
-                return {
-                    nome: link.innerText.trim(),
-                    codigo,
-                    frontEndIdTurma: matchFrontEnd ? matchFrontEnd[1] : null
-                };
-            }),
-            codigoPrefixo
-        );
-
-        console.log('Disciplinas encontradas:', disciplinasCodigos);
-
-        // Função para limpar o nome da disciplina
-        function limparNomeDisciplina(nomeCompleto) {
-            // Remove código do início e semestre/fim do final
-            // Exemplo: 'G05BDAD1.02 - BANCO DE DADOS I (60h) (2025.1)' => 'BANCO DE DADOS I'
-            return nomeCompleto
-                .replace(/^[^-\–]+[-\–]\s*/, '') // Remove código e traço do início
-                .replace(/\s*\(\d+h\)\s*\(\d{4}\.\d\)$/i, '') // Remove (60h) (2025.1) do final
-                .trim();
-        }
-
-        for (let i = 0; i < disciplinasCodigos.length; i++) {
-            let avisos = [];
+            const frequenciaNaoLancada = freqHtml.includes('A frequência ainda não foi lançada.');
             let frequencia = [];
             let numeroAulasDefinidas = null;
             let porcentagemFrequencia = null;
-            let notasHeaders = [];
-            let notas = [];
-            let avaliacoes = [];
-            let nomeDisciplinaAtual = '';
 
-            console.log(`[${i + 1}/${disciplinasCodigos.length}] Acessando disciplina: ${disciplinasCodigos[i].nome}`);
-
-            try {
-                if (i !== 0) {
-                    // Verifica e loga o conteúdo do legend antes de trocar de disciplina
-                    const legendText = await page.$eval(
-                        '#j_id_jsp_122142787_297 > fieldset > legend',
-                        el => el.innerText.trim()
-                    );
-                    console.log(`[DEBUG] Legend atual antes de trocar disciplina: "${legendText}"`);
-
-                    if (legendText !== 'Mapa de Frequências') {
-                        console.log('[DEBUG] Atenção: a aba atual não é "Mapa de Frequências"!');
-                    }
-
-                    // ...troca de disciplina...
-                    const nomeAnterior = limparNomeDisciplina(
-                        await page.$eval('#linkNomeTurma', el => el.innerText.trim())
-                    );
-                    console.log(`[DEBUG] Nome anterior no DOM: "${nomeAnterior}"`);
-                    console.log(`[DEBUG] Nome esperado para a próxima disciplina: "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
-
-                    await page.evaluate(({ codigo, frontEndIdTurma }) => {
-                        if (typeof jsfcljs === 'function') {
-                            const params = {};
-                            params[codigo] = codigo;
-                            params['frontEndIdTurma'] = frontEndIdTurma;
-                            jsfcljs(
-                                document.getElementById('formTurma'),
-                                params,
-                                ''
-                            );
-                        }
-                    }, { codigo: disciplinasCodigos[i].codigo, frontEndIdTurma: disciplinasCodigos[i].frontEndIdTurma });
-
-                    console.log(`[DEBUG] Aguardando seletor #linkNomeTurma aparecer...`);
-                    await page.waitForSelector('#linkNomeTurma', { timeout: 15000 });
-                    const nomeAchado = await page.$eval('#linkNomeTurma', el => el.innerText.trim());
-                    console.log(`[DEBUG] Nome encontrado no DOM após troca: "${nomeAchado}"`);
-                    console.log(`[DEBUG] Comparação: "${nomeAchado}" === "${limparNomeDisciplina(disciplinasCodigos[i].nome)}"`);
-
-                    // A espera pelo '.menu-direita' foi removida.
-                    // O seletor é opcional e o código de coleta de avisos abaixo já lida com a ausência dele.
-                    console.log(`[${limparNomeDisciplina(disciplinasCodigos[i].nome)}] Página da disciplina carregada.`);
-                }
-
-                try {
-                    nomeDisciplinaAtual = (await page.$eval('#linkNomeTurma', el => el.innerText.trim())
-                    );
-                    console.log(`[${nomeDisciplinaAtual}] Nome da disciplina acessada`);
-                } catch {
-                    try {
-                        nomeDisciplinaAtual = limparNomeDisciplina(
-                            await page.$eval('.descricao-disciplina, .disciplina, .titulo-disciplina, .subtitulo', el => el.innerText.trim())
-                        );
-                    } catch {
-                        // fallback para o nome salvo no array, se não encontrar no DOM
-                        nomeDisciplinaAtual = limparNomeDisciplina(disciplinasCodigos[i].nome);
-                    }
-                }
-
-                // ... restante do seu código, substitua disciplina.nome por nomeDisciplinaAtual ...
-
-                console.log(`[${nomeDisciplinaAtual}] Coletando avisos`);
-                avisos = await page.$$eval('.menu-direita > li', items => {
-                    return items.map(li => ({
-                        data: li.querySelector('.data')?.innerText.trim(),
-                        descricao: li.querySelector('.descricao')?.innerText.trim()
-                    }));
-                });
-
-                // Frequência
-                const frequenciaInfo = 'formMenu:j_id_jsp_311393315_97';
-                console.log(`[${nomeDisciplinaAtual}] Acessando frequência`);
-                await page.evaluate((codigo) => {
-                    if (typeof jsfcljs === 'function') {
-                        jsfcljs(
-                            document.getElementById('formMenu'),
-                            { [codigo]: codigo },
-                            ''
-                        );
-                    }
-                }, frequenciaInfo);
-
-                console.log(`[${nomeDisciplinaAtual}] Aguardando fieldset de frequência`);
-                await page.waitForSelector('fieldset', { timeout: 7000 });
-
-                let frequenciaNaoLancada = false;
-                let tabelaFrequenciaVisivel = false;
-                try {
-                    console.log(`[${nomeDisciplinaAtual}] Verificando se frequência foi lançada`);
-                    await Promise.race([
-                        page.waitForSelector('fieldset > span', { timeout: 15000 }),
-                        page.waitForSelector('fieldset > table', { timeout: 15000 })
-                    ]);
-                    frequenciaNaoLancada = await page.evaluate(() => {
-                        const span = Array.from(document.querySelectorAll('fieldset > span')).find(el =>
-                            el.innerText.includes('A frequência ainda não foi lançada.')
-                        );
-                        return !!span;
-                    });
-                    tabelaFrequenciaVisivel = await page.$('fieldset > table') !== null;
-                } catch (e) {
-                    console.log(`[${nomeDisciplinaAtual}] Erro ao verificar frequência: ${e.message}`);
-                }
-
-                if (frequenciaNaoLancada) {
-                    console.log(`[${nomeDisciplinaAtual}] Frequência ainda não lançada`);
-                    disciplinasComAvisos.push({
-                        disciplina: nomeDisciplinaAtual,
-                        ...disciplinasCodigos[i],
-                        avisos,
-                        frequencia: [],
-                        numeroAulasDefinidas: null,
-                        porcentagemFrequencia: null,
-                        notas: {
-                            headers: [],
-                            valores: [],
-                            avaliacoes: [],
-                            mensagem: 'Ainda não foram lançadas notas.'
-                        },
-                        mensagem: 'A frequência ainda não foi lançada.'
-                    });
-                    continue;
-                }
-
-                if (!tabelaFrequenciaVisivel) {
-                    console.log(`[${nomeDisciplinaAtual}] Aguardando tabela de frequência`);
-                    await page.waitForSelector('fieldset > table', { timeout: 15000 });
-                }
-
-                console.log(`[${nomeDisciplinaAtual}] Coletando frequência`);
-                frequencia = await page.$$eval(
-                    'fieldset > table > tbody tr',
-                    rows => rows.map(tr => {
-                        const tds = tr.querySelectorAll('td');
-                        return {
-                            data: tds[0]?.innerText.trim(),
-                            status: tds[1]?.innerText.trim()
-                        };
-                    })
-                );
-
-                console.log(`[${nomeDisciplinaAtual}] Coletando número de aulas definidas`);
-                numeroAulasDefinidas = await page.$eval('.botoes-show', el => {
-                    const match = el.innerText.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
-                    return match ? parseInt(match[1], 10) : null;
-                });
-
-                console.log(`[${nomeDisciplinaAtual}] Coletando porcentagem de frequência`);
-                porcentagemFrequencia = await page.$eval('.botoes-show', el => {
-                    const match = el.innerText.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
-                    return match ? parseInt(match[1], 10) : null;
-                });
-
-                // Notas
-                const notasInfo = 'formMenu:j_id_jsp_122142787_99';
-                console.log(`[${nomeDisciplinaAtual}] Acessando notas`);
-                await page.evaluate((codigo) => {
-                    if (typeof jsfcljs === 'function') {
-                        jsfcljs(
-                            document.getElementById('formMenu'),
-                            { [codigo]: codigo },
-                            ''
-                        );
-                    }
-                }, notasInfo);
-
-                // Aguarda ou a mensagem de notas não lançadas OU a tabela aparecer, o que vier primeiro
-                let notasNaoLancadas = false;
-                let tabelaNotasVisivel = false;
-                try {
-                    console.log(`[${nomeDisciplinaAtual}] Verificando se notas foram lançadas`);
-                    await Promise.race([
-                        page.waitForSelector('ul.warning li', { timeout: 5000 }),
-                        page.waitForSelector('table.tabelaRelatorio', { timeout: 5000 })
-                    ]);
-                    notasNaoLancadas = await page.evaluate(() => {
-                        const li = Array.from(document.querySelectorAll('ul.warning li')).find(el =>
-                            el.innerText.includes('Ainda não foram lançadas notas.')
-                        );
-                        return !!li;
-                    });
-                    tabelaNotasVisivel = await page.$('table.tabelaRelatorio') !== null;
-                } catch (e) {
-                    console.log(`[${nomeDisciplinaAtual}] Erro ao verificar notas: ${e.message}`);
-                }
-
-                if (notasNaoLancadas) {
-                    console.log(`[${nomeDisciplinaAtual}] Notas ainda não lançadas`);
-                    disciplinasComAvisos.push({
-                        disciplina: nomeDisciplinaAtual,
-                        ...disciplinasCodigos[i],
-                        avisos,
-                        frequencia,
-                        numeroAulasDefinidas,
-                        porcentagemFrequencia,
-                        notas: {
-                            headers: [],
-                            valores: [],
-                            avaliacoes: [],
-                            mensagem: 'Ainda não foram lançadas notas.'
-                        }
-                    });
-                    // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
-                    console.log(`[${nomeDisciplinaAtual}] Nao voltando para tela de disciplinas`);
-                    //await page.goBack();
-                    continue;
-                }
-
-                if (!tabelaNotasVisivel) {
-                    try {
-                        console.log(`[${nomeDisciplinaAtual}] Aguardando tabela de notas`);
-                        await page.waitForSelector('table.tabelaRelatorio', { timeout: 3000 });
-                    } catch (e) {
-                        console.log(`[${nomeDisciplinaAtual}] Erro ao aguardar tabela de notas: ${e.message}`);
-                    }
-                }
-
-                try {
-                    console.log(`[${nomeDisciplinaAtual}] Coletando cabeçalhos de notas`);
-                    notasHeaders = await page.$$eval('table.tabelaRelatorio thead tr#trAval th', ths =>
-                        ths.map(th => th.innerText.trim()).filter(Boolean)
-                    );
-                    console.log(`[${nomeDisciplinaAtual}] Coletando valores de notas`);
-                    notas = await page.$$eval('table.tabelaRelatorio tbody tr', rows =>
-                        rows.map(tr => {
-                            const tds = Array.from(tr.querySelectorAll('td'));
-                            return tds.map(td => td.innerText.trim());
-                        })
-                    );
-                    console.log(`[${nomeDisciplinaAtual}] Coletando avaliações`);
-                    avaliacoes = await page.$$eval('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]', ths =>
-                        ths.map(th => {
-                            const id = th.id.replace('aval_', '');
-                            const abrev = document.getElementById('abrevAval_' + id)?.value || '';
-                            const den = document.getElementById('denAval_' + id)?.value || '';
-                            const nota = document.getElementById('notaAval_' + id)?.value || '';
-                            const peso = document.getElementById('pesoAval_' + id)?.value || '';
-                            return { abrev, den, nota, peso };
-                        })
-                    );
-                } catch (e) {
-                    console.log(`[${nomeDisciplinaAtual}] Erro ao coletar notas: ${e.message}`);
-                }
-
-                disciplinasComAvisos.push({
-                    disciplina: nomeDisciplinaAtual,
-                    ...disciplinasCodigos[i],
-                    avisos,
-                    frequencia,
-                    numeroAulasDefinidas,
-                    porcentagemFrequencia,
-                    notas: {
-                        headers: notasHeaders,
-                        valores: notas,
-                        avaliacoes
-                    }
-                });
-
-                // Volta para a tela de disciplinas, pois a aba de notas é uma página à parte
-                console.log(`[${nomeDisciplinaAtual}] Voltando para tela de disciplinas`);
-                await page.goBack();
-
-            } 
-            catch (e) {
-                console.log(`[${nomeDisciplinaAtual}] Erro geral: ${e.message}`);
-                disciplinasComAvisos.push({ disciplina: nomeDisciplinaAtual, ...disciplinasCodigos[i], avisos: [], frequencia: [], erro: e.message });
-                // Se der erro na página de notas, tente voltar para a tela de disciplinas
-                try { 
-                    console.log(`[${nomeDisciplinaAtual}] Tentando voltar para tela de disciplinas após erro`);
-                    //await page.goBack(); 
-                } catch {}
+            if (!frequenciaNaoLancada && freqHtml.includes('linhaImpar')) {
+                frequencia = parseFrequencia(freqHtml);
+                const stats = parseFrequenciaStats(freqHtml);
+                numeroAulasDefinidas = stats.numeroAulasDefinidas;
+                porcentagemFrequencia = stats.porcentagemFrequencia;
+                console.log(`[scraper]   ${frequencia.length} registros de frequência`);
+            } else {
+                console.log(`[scraper]   Frequência não lançada`);
             }
+
+            // 3c: Notas
+            const notasPayload = new URLSearchParams();
+            notasPayload.set('formMenu', 'formMenu');
+            notasPayload.set(`formMenu:j_id_jsp_${avaMenuId}_97`, `formMenu:j_id_jsp_${avaMenuId}_97`);
+            notasPayload.set('javax.faces.ViewState', avaViewState);
+
+            const notasRes = await client.post('/sigaa/ava/index.jsf', notasPayload.toString(), {
+                headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
+            });
+            const notasHtml = notasRes.data;
+
+            let notas;
+            if (notasHtml.includes('Ainda não foram lançadas notas.')) {
+                notas = { headers: [], valores: [], avaliacoes: [], mensagem: 'Ainda não foram lançadas notas.' };
+                console.log(`[scraper]   Notas não lançadas`);
+            } else {
+                const parsed = parseNotas(notasHtml);
+                notas = parsed ?? { headers: [], valores: [], avaliacoes: [], mensagem: 'Ainda não foram lançadas notas.' };
+                if (parsed) console.log(`[scraper]   Notas OK (${parsed.headers.length} avaliações)`);
+            }
+
+            avisosPorDisciplina.push({
+                disciplina: turma.nome,
+                idTurma: turma.idTurma,
+                avisos,
+                frequencia,
+                numeroAulasDefinidas,
+                porcentagemFrequencia,
+                notas,
+                ...(frequenciaNaoLancada && { mensagem: 'A frequência ainda não foi lançada.' }),
+            });
         }
-        console.timeEnd('avisos');
 
-        await browser.close();
-
-        console.timeEnd('total');
-
+        console.log('[scraper] Concluído');
         return res.status(200).json({
             dadosInstitucionais,
-            horariosDetalhados: detailedSchedule,
-            horariosSimplificados: simplifiedSchedule,
-            avisosPorDisciplina: disciplinasComAvisos
+            horariosDetalhados,
+            horariosSimplificados,
+            avisosPorDisciplina,
         });
 
     } catch (error) {
-        if (browser) await browser.close();
+        const msg = error.message || 'Erro interno';
 
-        let mensagem = error.message || 'Erro interno';
-
-        // Erro de timeout de rede — típico quando o servidor bloqueia IPs de nuvem
         if (
-            mensagem.includes('ERR_CONNECTION_TIMED_OUT') ||
-            mensagem.includes('net::ERR_') ||
-            mensagem.includes('TimeoutError') ||
-            mensagem.includes('Navigation timeout')
+            msg.includes('ERR_CONNECTION_TIMED_OUT') ||
+            msg.includes('net::ERR_') ||
+            msg.includes('TimeoutError') ||
+            msg.includes('ECONNREFUSED') ||
+            msg.includes('ETIMEDOUT')
         ) {
-            mensagem =
-                'Não foi possível conectar ao SIGAA. ' +
-                'O servidor sig.cefetmg.br bloqueou a conexão vinda desta plataforma de hospedagem (IP de nuvem). ' +
-                'Isso é uma restrição do servidor do SIGAA, não um erro no código. ' +
-                'Para resolver, hospede o backend em um servidor com IP residencial ou em uma VPS brasileira.';
-            console.error('[SIGAA] Bloqueio de IP / timeout de rede:', error.message);
-            return res.status(503).json({ error: mensagem });
+            return res.status(503).json({
+                error:
+                    'Não foi possível conectar ao SIGAA. ' +
+                    'O servidor sig.cefetmg.br bloqueou a conexão vinda desta plataforma. ' +
+                    'Hospede o backend em um servidor com IP residencial ou VPS brasileira.',
+            });
         }
 
-        console.error('[SIGAA] Erro interno:', error.message);
-        return res.status(500).json({ error: mensagem });
+        console.error('[scraper] Erro:', msg);
+        return res.status(500).json({ error: msg });
     }
 };
