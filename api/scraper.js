@@ -47,18 +47,40 @@ function decodeHtmlEntities(str) {
 }
 
 function extractTurmas(html) {
+    // Usa cheerio para extrair idTurma do form[id^="form_acessarTurmaVirtual_"],
+    // que só existe em linhas de disciplinas reais do portal discente.
+    const $ = load(html);
     const turmas = [];
-    const pattern = /'idTurma':'(\d+)'[^}]*}\s*,\s*''\s*\)\s*;\s*\}\s*return[^>]*>([^<]+)</g;
-    let match;
-    while ((match = pattern.exec(html)) !== null) {
-        turmas.push({ idTurma: match[1], nome: decodeHtmlEntities(match[2].trim()) });
-    }
     const seen = new Set();
-    return turmas.filter(t => {
-        if (seen.has(t.idTurma)) return false;
-        seen.add(t.idTurma);
-        return true;
+
+    $('form[id^="form_acessarTurmaVirtual_"]').each((_, form) => {
+        const formId = $(form).attr('id') || '';
+        const idTurma = formId.replace('form_acessarTurmaVirtual_', '').trim();
+        if (!idTurma || seen.has(idTurma)) return;
+        seen.add(idTurma);
+
+        // Nome da disciplina: td.descricao mais próxima na mesma linha
+        const row = $(form).closest('tr');
+        const nomeRaw = row.find('td.descricao a').text().trim()
+            || row.find('td.descricao').text().trim();
+        const nome = decodeHtmlEntities(nomeRaw);
+        if (nome) turmas.push({ idTurma, nome });
     });
+
+    // Fallback: regex para ambientes onde o selector cheerio não encontrar nada
+    if (turmas.length === 0) {
+        const pattern = /'idTurma':'(\d+)'[^)]*\)[^>]*>([^<]+)/g;
+        let match;
+        while ((match = pattern.exec(html)) !== null) {
+            const idTurma = match[1];
+            if (seen.has(idTurma)) continue;
+            seen.add(idTurma);
+            const nome = decodeHtmlEntities(match[2].trim());
+            if (nome) turmas.push({ idTurma, nome });
+        }
+    }
+
+    return turmas;
 }
 
 function extractFormAtualizacoesTurmasId(html) {
