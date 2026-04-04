@@ -47,36 +47,73 @@ function decodeHtmlEntities(str) {
 }
 
 function extractTurmas(html) {
-    // Usa cheerio para extrair idTurma do form[id^="form_acessarTurmaVirtual_"],
-    // que só existe em linhas de disciplinas reais do portal discente.
+    // Extrai todas as disciplinas do portal via form_acessarTurmaVirtual.
+    // Cada disciplina tem: nome, frontEndIdTurma (hash SHA1), formId, buttonFieldKey.
+    // Mapeia nome → idTurma numérico via formAtualizacoesTurmas para manter o contrato de output.
     const $ = load(html);
     const turmas = [];
     const seen = new Set();
 
-    $('form[id^="form_acessarTurmaVirtual_"]').each((_, form) => {
-        const formId = $(form).attr('id') || '';
-        const idTurma = formId.replace('form_acessarTurmaVirtual_', '').trim();
-        if (!idTurma || seen.has(idTurma)) return;
-        seen.add(idTurma);
-
-        // Nome da disciplina: td.descricao mais próxima na mesma linha
-        const row = $(form).closest('tr');
-        const nomeRaw = row.find('td.descricao a').text().trim()
-            || row.find('td.descricao').text().trim();
-        const nome = decodeHtmlEntities(nomeRaw);
-        if (nome) turmas.push({ idTurma, nome });
+    // 1. Mapa nome base (sem semestre) → idTurma numérico via links do painel formAtualizacoesTurmas
+    const nomeToIdTurma = {};
+    $('[onclick]').each((_, el) => {
+        const oc = $(el).attr('onclick') || '';
+        if (!oc.includes('formAtualizacoesTurmas')) return;
+        const mId = oc.match(/'idTurma'\s*:\s*'(\d+)'/);
+        if (!mId) return;
+        const nomeLink = decodeHtmlEntities($(el).text().trim());
+        if (nomeLink) {
+            const nomeBase = nomeLink.replace(/\s*\(.*\)\s*$/, '').trim().toUpperCase();
+            nomeToIdTurma[nomeBase] = mId[1];
+        }
     });
 
-    // Fallback: regex para ambientes onde o selector cheerio não encontrar nada
+    // 2. Extrai cada linha com form_acessarTurmaVirtual
+    $('tbody tr').each((_, row) => {
+        const $row = $(row);
+        const form = $row.find('form[id^="form_acessarTurmaVirtual"]').first();
+        if (!form.length) return;
+
+        const nomeRaw = $row.find('td.descricao a').text().trim()
+            || $row.find('td.descricao').text().trim();
+        if (!nomeRaw) return;
+        const nome = decodeHtmlEntities(nomeRaw);
+
+        // frontEndIdTurma: hash SHA1 no onclick do botão de acesso
+        let frontEndIdTurma = null;
+        let buttonFieldKey = null;
+        $row.find('[onclick]').each((_, el) => {
+            if (frontEndIdTurma) return;
+            const oc = $(el).attr('onclick') || '';
+            const mFe = oc.match(/'frontEndIdTurma'\s*:\s*'([A-Fa-f0-9]{20,})'/);
+            if (!mFe) return;
+            frontEndIdTurma = mFe[1];
+            // Campo do botão: {'form_acessarTurmaVirtualXXX:j_id_YYY':'...','frontEndIdTurma':...}
+            const mBtn = oc.match(/\{'([^']+)'\s*:\s*'[^']*'\s*,\s*'frontEndIdTurma'/);
+            if (mBtn) buttonFieldKey = mBtn[1];
+        });
+
+        if (!frontEndIdTurma || seen.has(frontEndIdTurma)) return;
+        seen.add(frontEndIdTurma);
+
+        // idTurma numérico (pode ser null se disciplina não aparece no painel de avisos)
+        const nomeBase = nome.replace(/\s*\(.*\)\s*$/, '').trim().toUpperCase();
+        const idTurma = nomeToIdTurma[nomeBase] || null;
+
+        turmas.push({ nome, frontEndIdTurma, formId: form.attr('id'), buttonFieldKey, idTurma });
+    });
+
+    // Fallback: se nada foi encontrado, tenta via formAtualizacoesTurmas (HTML antigo)
     if (turmas.length === 0) {
-        const pattern = /'idTurma':'(\d+)'[^)]*\)[^>]*>([^<]+)/g;
+        const pattern = /'idTurma'\s*:\s*'(\d+)'[^)]*\)[^>]*>([^<]+)/g;
         let match;
+        const seenFb = new Set();
         while ((match = pattern.exec(html)) !== null) {
             const idTurma = match[1];
-            if (seen.has(idTurma)) continue;
-            seen.add(idTurma);
+            if (seenFb.has(idTurma)) continue;
+            seenFb.add(idTurma);
             const nome = decodeHtmlEntities(match[2].trim());
-            if (nome) turmas.push({ idTurma, nome });
+            if (nome) turmas.push({ nome, frontEndIdTurma: null, formId: null, buttonFieldKey: null, idTurma });
         }
     }
 
@@ -312,7 +349,8 @@ module.exports = async function handler(req, res) {
         const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
         const turmas              = extractTurmas(portalHtml);
 
-        console.log(`[scraper] ${turmas.length} turma(s) encontrada(s)`);
+        console.log(`[scraper] ${turmas.length} turma(s) encontrada(s): ${turmas.map(t => `${t.nome}(${t.idTurma})`).join(', ')}`);
+        console.log(`[scraper] scheduleRaw: ${scheduleRaw.length} disciplina(s) nos horários`);
 
         // ── PASSO 3: Para cada turma ──────────────────────────────────────
         const avisosPorDisciplina = [];
@@ -320,13 +358,22 @@ module.exports = async function handler(req, res) {
         for (const turma of turmas) {
             console.log(`[scraper] Turma: ${turma.nome} (${turma.idTurma})`);
 
-            // 3a: Entra no AVA
+            // 3a: Entra no AVA via form_acessarTurmaVirtual + frontEndIdTurma (funciona para TODAS as disciplinas)
             const avaPayload = new URLSearchParams();
-            avaPayload.set('formAtualizacoesTurmas', 'formAtualizacoesTurmas');
-            if (formAtuId) {
-                avaPayload.set(`formAtualizacoesTurmas:${formAtuId}`, `formAtualizacoesTurmas:${formAtuId}`);
+            if (turma.frontEndIdTurma && turma.formId) {
+                avaPayload.set(turma.formId, turma.formId);
+                if (turma.buttonFieldKey) {
+                    avaPayload.set(turma.buttonFieldKey, turma.buttonFieldKey);
+                }
+                avaPayload.set('frontEndIdTurma', turma.frontEndIdTurma);
+            } else {
+                // Fallback: disciplinas extraídas via método antigo (sem frontEndIdTurma)
+                avaPayload.set('formAtualizacoesTurmas', 'formAtualizacoesTurmas');
+                if (formAtuId) {
+                    avaPayload.set(`formAtualizacoesTurmas:${formAtuId}`, `formAtualizacoesTurmas:${formAtuId}`);
+                }
+                avaPayload.set('idTurma', turma.idTurma);
             }
-            avaPayload.set('idTurma', turma.idTurma);
             avaPayload.set('javax.faces.ViewState', portalViewState ?? 'j_id3');
 
             const avaRes = await client.post('/sigaa/portais/discente/discente.jsf', avaPayload.toString(), {
