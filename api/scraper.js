@@ -304,6 +304,9 @@ module.exports = async function handler(req, res) {
     if (!user || !pass) return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
 
     const clientId = req.body.clientId || '';  // Para progress tracking
+    
+    // IMPORTANTE: Resetar progresso no início (remove valor anterior se houver)
+    setProgress(clientId, 0, 'Iniciando...');
 
     const jar = new CookieJar();
     const client = axios.create({
