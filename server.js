@@ -6,6 +6,7 @@ const express = require('express');
 const fs = require('fs');
 const loginHandler = require('./api/login');
 const scraperHandler = require('./api/scraper');
+const { getProgress } = require('./api/progress');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -93,6 +94,13 @@ app.get('/api/queue-status', (req, res) => {
         processing: isScraperBusy,
         avgTimeMs: getAvgScrapeTimeMs()
     });
+});
+
+// ── Novo endpoint: progresso em tempo real ────────────────────────────────
+app.get('/api/scraper-progress', (req, res) => {
+    const clientId = req.query.clientId || '';
+    const progress = getProgress(clientId);
+    res.json(progress);
 });
 
 // Rota de login
