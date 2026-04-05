@@ -7,7 +7,6 @@ const progressTracker = new Map(); // clientId → { progress: 0-100, status: ".
 const PROGRESS_CLEANUP_MS = 5 * 60 * 1000; // limpar depois de 5 min
 
 function setProgress(clientId, progress, status) {
-    if (!clientId) return;
     progressTracker.set(clientId, { progress, status, lastUpdate: Date.now() });
 }
 
@@ -19,7 +18,7 @@ function getProgress(clientId) {
 }
 
 function clearProgress(clientId) {
-    if (clientId) progressTracker.delete(clientId);
+    progressTracker.delete(clientId);
 }
 
 // Limpeza automática de progresso antigo

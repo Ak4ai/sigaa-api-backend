@@ -303,9 +303,10 @@ module.exports = async function handler(req, res) {
 
     if (!user || !pass) return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
 
-    const clientId = req.body.clientId || '';  // Para progress tracking
+    // Garante um clientId válido (usa alternativa padrão se não fornecido)
+    const clientId = req.body.clientId || `scraper-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     
-    // IMPORTANTE: Resetar progresso no início (remove valor anterior se houver)
+    // Resetar progresso no início
     setProgress(clientId, 0, 'Iniciando...');
 
     const jar = new CookieJar();
