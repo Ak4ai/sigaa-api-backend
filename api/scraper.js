@@ -18,6 +18,7 @@ const { URLSearchParams } = require('url');
 const https = require('https');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { validarTokenLogin } = require('./auth');
+const { setProgress } = require('./progress');
 
 const BASE_URL = 'https://sig.cefetmg.br';
 
@@ -302,6 +303,8 @@ module.exports = async function handler(req, res) {
 
     if (!user || !pass) return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
 
+    const clientId = req.body.clientId || '';  // Para progress tracking
+
     const jar = new CookieJar();
     const client = axios.create({
         baseURL: BASE_URL,
@@ -352,6 +355,7 @@ module.exports = async function handler(req, res) {
             return res.status(401).json({ error: 'Usuário e/ou senha inválidos.' });
         }
         console.log('[scraper] Login OK');
+        setProgress(clientId, 10, '🔓 Login realizado...');
 
         // ── PASSO 2: Portal discente ───────────────────────────────────────
         console.log('[scraper] Carregando portal discente...');
@@ -402,10 +406,15 @@ module.exports = async function handler(req, res) {
         console.log(`[scraper] ${turmas.length} turma(s) encontrada(s): ${turmas.map(t => `${t.nome}(${t.idTurma})`).join(', ')}`);
         console.log(`[scraper] scheduleRaw: ${scheduleRaw.length} disciplina(s) nos horários`);
 
+        setProgress(clientId, 20, '📚 Portal carregado...');
+
         // ── PASSO 3: Para cada turma ──────────────────────────────────────
         const avisosPorDisciplina = [];
 
-        for (const turma of turmas) {
+        for (let i = 0; i < turmas.length; i++) {
+            const turma = turmas[i];
+            const progressPercent = Math.min(20 + (i + 1) * 10, 90); // 30%, 40%, ..., 90%
+            setProgress(clientId, progressPercent, `⏳ Processando ${turma.nome}...`);
             console.log(`[scraper] Turma: ${turma.nome} (${turma.idTurma})`);
 
             // 3a: Entra no AVA via form_acessarTurmaVirtual + frontEndIdTurma (funciona para TODAS as disciplinas)
@@ -510,6 +519,8 @@ module.exports = async function handler(req, res) {
         }
 
         console.log('[scraper] Concluído');
+        setProgress(clientId, 100, '✅ Concluído!');
+        
         return res.status(200).json({
             dadosInstitucionais,
             horariosDetalhados,
