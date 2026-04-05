@@ -29,6 +29,23 @@ const BASE_HEADERS = {
     'Content-Type': 'application/x-www-form-urlencoded',
 };
 
+// ── REGEX COMPILADAS (executa uma vez, reutiliza em todas as requisições) ────
+const REGEX_ID_TURMA = /'idTurma'\s*:\s*'(\d+)'/;
+const REGEX_NOME_BASE = /\s*\(.*\)\s*$/;
+const REGEX_FRONTEND_ID_TURMA = /'frontEndIdTurma'\s*:\s*'([A-Fa-f0-9]{20,})'/;
+const REGEX_BUTTON_FIELD_KEY = /\{'([^']+)'\s*:\s*'[^']*'\s*,\s*'frontEndIdTurma'/;
+const REGEX_ID_TURMA_FALLBACK = /'idTurma'\s*:\s*'(\d+)'[^)]*\)[^>]*>([^<]+)/g;
+const REGEX_FORM_ATU_ID = /formAtualizacoesTurmas:(j_id_jsp_\d+_\d+)['":]/;
+const REGEX_FORM_MENU_AVA_ID = /id="formMenu:j_id_jsp_(\d+)_69"/;
+const REGEX_FORM_MENU_AVA_ID_ALT = /formMenu:j_id_jsp_(\d+)_69/;
+const REGEX_AULAS_DEFINIDAS = /Número de Aulas definidas pela CH do Componente:\s*(\d+)/i;
+const REGEX_PORCENTAGEM_FREQ = /Porcentagem de Frequência em relação a CH:\s*(\d+)%/i;
+const REGEX_DATA_AULA = /\d{2}\/\d{2}\/\d{4}/;
+
+// ── CACHE DE HORÁRIOS (não muda a cada 6 meses) ────────────────────────────
+const scheduleCache = new Map(); // user → { timestamp, data }
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 horas
+
 // ── Helpers de extração ─────────────────────────────────────────────────────
 
 function extractHiddenFields(html) {
@@ -59,11 +76,11 @@ function extractTurmas(html) {
     $('[onclick]').each((_, el) => {
         const oc = $(el).attr('onclick') || '';
         if (!oc.includes('formAtualizacoesTurmas')) return;
-        const mId = oc.match(/'idTurma'\s*:\s*'(\d+)'/);
+        const mId = oc.match(REGEX_ID_TURMA);
         if (!mId) return;
         const nomeLink = decodeHtmlEntities($(el).text().trim());
         if (nomeLink) {
-            const nomeBase = nomeLink.replace(/\s*\(.*\)\s*$/, '').trim().toUpperCase();
+            const nomeBase = nomeLink.replace(REGEX_NOME_BASE, '').trim().toUpperCase();
             nomeToIdTurma[nomeBase] = mId[1];
         }
     });
@@ -85,11 +102,11 @@ function extractTurmas(html) {
         $row.find('[onclick]').each((_, el) => {
             if (frontEndIdTurma) return;
             const oc = $(el).attr('onclick') || '';
-            const mFe = oc.match(/'frontEndIdTurma'\s*:\s*'([A-Fa-f0-9]{20,})'/);
+            const mFe = oc.match(REGEX_FRONTEND_ID_TURMA);
             if (!mFe) return;
             frontEndIdTurma = mFe[1];
             // Campo do botão: {'form_acessarTurmaVirtualXXX:j_id_YYY':'...','frontEndIdTurma':...}
-            const mBtn = oc.match(/\{'([^']+)'\s*:\s*'[^']*'\s*,\s*'frontEndIdTurma'/);
+            const mBtn = oc.match(REGEX_BUTTON_FIELD_KEY);
             if (mBtn) buttonFieldKey = mBtn[1];
         });
 
@@ -97,7 +114,7 @@ function extractTurmas(html) {
         seen.add(frontEndIdTurma);
 
         // idTurma numérico (pode ser null se disciplina não aparece no painel de avisos)
-        const nomeBase = nome.replace(/\s*\(.*\)\s*$/, '').trim().toUpperCase();
+        const nomeBase = nome.replace(REGEX_NOME_BASE, '').trim().toUpperCase();
         const idTurma = nomeToIdTurma[nomeBase] || null;
 
         turmas.push({ nome, frontEndIdTurma, formId: form.attr('id'), buttonFieldKey, idTurma });
@@ -105,7 +122,7 @@ function extractTurmas(html) {
 
     // Fallback: se nada foi encontrado, tenta via formAtualizacoesTurmas (HTML antigo)
     if (turmas.length === 0) {
-        const pattern = /'idTurma'\s*:\s*'(\d+)'[^)]*\)[^>]*>([^<]+)/g;
+        const pattern = REGEX_ID_TURMA_FALLBACK;
         let match;
         const seenFb = new Set();
         while ((match = pattern.exec(html)) !== null) {
@@ -121,14 +138,14 @@ function extractTurmas(html) {
 }
 
 function extractFormAtualizacoesTurmasId(html) {
-    const match = html.match(/formAtualizacoesTurmas:(j_id_jsp_\d+_\d+)['":]/);
+    const match = html.match(REGEX_FORM_ATU_ID);
     return match ? match[1] : null;
 }
 
 function extractFormMenuAvaId(html) {
-    const match = html.match(/id="formMenu:j_id_jsp_(\d+)_69"/);
+    const match = html.match(REGEX_FORM_MENU_AVA_ID);
     if (match) return match[1];
-    const match2 = html.match(/formMenu:j_id_jsp_(\d+)_69/);
+    const match2 = html.match(REGEX_FORM_MENU_AVA_ID_ALT);
     return match2 ? match2[1] : null;
 }
 
@@ -205,7 +222,7 @@ function parseFrequencia(html) {
         if (tds.length >= 2) {
             const data = $(tds[0]).text().trim();
             const status = $(tds[1]).text().trim();
-            if (/\d{2}\/\d{2}\/\d{4}/.test(data) && status.length > 0) {
+            if (REGEX_DATA_AULA.test(data) && status.length > 0) {
                 registros.push({ data, status });
             }
         }
@@ -218,8 +235,8 @@ function parseFrequenciaStats(html) {
     const $ = load(html);
     const texto = $('.botoes-show').text();
 
-    const matchAulas = texto.match(/Número de Aulas definidas pela CH do Componente:\s*(\d+)/i);
-    const matchPct   = texto.match(/Porcentagem de Frequência em relação a CH:\s*(\d+)%/i);
+    const matchAulas = texto.match(REGEX_AULAS_DEFINIDAS);
+    const matchPct   = texto.match(REGEX_PORCENTAGEM_FREQ);
 
     return {
         numeroAulasDefinidas: matchAulas ? parseInt(matchAulas[1], 10) : null,
@@ -290,7 +307,7 @@ module.exports = async function handler(req, res) {
         baseURL: BASE_URL,
         validateStatus: () => true,
         decompress: true,
-        timeout: 30000,
+        timeout: 12000,
         httpsAgent: new https.Agent({ rejectUnauthorized: false }),
     });
 
@@ -343,8 +360,41 @@ module.exports = async function handler(req, res) {
 
         const dadosInstitucionais = parseDadosInstitucionais(portalHtml);
         const scheduleRaw         = parseScheduleRaw(portalHtml);
-        const horariosDetalhados  = interpretSchedule(scheduleRaw);
-        const horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+        
+        // ── CACHE DE HORÁRIOS (24 horas) ──────────────────────────────
+        let horariosDetalhados, horariosSimplificados;
+        const cacheKey = user;
+        const now = Date.now();
+        
+        if (scheduleCache.has(cacheKey)) {
+            const cached = scheduleCache.get(cacheKey);
+            if (now - cached.timestamp < CACHE_DURATION) {
+                console.log('[scraper] ✓ Horários do cache (24h)');
+                horariosDetalhados = cached.horariosDetalhados;
+                horariosSimplificados = cached.horariosSimplificados;
+            } else {
+                // Cache expirado, recalcula
+                horariosDetalhados = interpretSchedule(scheduleRaw);
+                horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+                scheduleCache.set(cacheKey, { 
+                    timestamp: now, 
+                    horariosDetalhados, 
+                    horariosSimplificados 
+                });
+                console.log('[scraper] ✓ Horários recalculados e cacheados');
+            }
+        } else {
+            // Primeiro acesso, calcula e cachea
+            horariosDetalhados = interpretSchedule(scheduleRaw);
+            horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+            scheduleCache.set(cacheKey, { 
+                timestamp: now, 
+                horariosDetalhados, 
+                horariosSimplificados 
+            });
+            console.log('[scraper] ✓ Horários calculados e cacheados');
+        }
+        
         const portalViewState     = extractHiddenFields(portalHtml)['javax.faces.ViewState'];
         const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
         const turmas              = extractTurmas(portalHtml);
