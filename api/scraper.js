@@ -306,6 +306,9 @@ module.exports = async function handler(req, res) {
     // Garante um clientId válido (usa alternativa padrão se não fornecido)
     const clientId = req.body.clientId || `scraper-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     
+    // Verifica se deve pular o fetch de horários
+    const skipSchedule = req.body.skipSchedule === true;
+    
     // Resetar progresso no início
     setProgress(clientId, 0, 'Iniciando...');
 
@@ -369,19 +372,39 @@ module.exports = async function handler(req, res) {
         const dadosInstitucionais = parseDadosInstitucionais(portalHtml);
         const scheduleRaw         = parseScheduleRaw(portalHtml);
         
-        // ── CACHE DE HORÁRIOS (24 horas) ──────────────────────────────
+        // ── CACHE DE HORÁRIOS (24 horas) ou PULAR HORÁRIOS ──────────────────
         let horariosDetalhados, horariosSimplificados;
-        const cacheKey = user;
-        const now = Date.now();
         
-        if (scheduleCache.has(cacheKey)) {
-            const cached = scheduleCache.get(cacheKey);
-            if (now - cached.timestamp < CACHE_DURATION) {
-                console.log('[scraper] ✓ Horários do cache (24h)');
-                horariosDetalhados = cached.horariosDetalhados;
-                horariosSimplificados = cached.horariosSimplificados;
+        if (skipSchedule) {
+            // Pula o fetch de horários
+            console.log('[scraper] ⏭️ Pulando horários (skipSchedule=true)');
+            horariosDetalhados = [];
+            horariosSimplificados = [];
+            setProgress(clientId, 20, '⏭️ Horários pulados...');
+        } else {
+            // Processa horários normalmente com cache de 24h
+            const cacheKey = user;
+            const now = Date.now();
+            
+            if (scheduleCache.has(cacheKey)) {
+                const cached = scheduleCache.get(cacheKey);
+                if (now - cached.timestamp < CACHE_DURATION) {
+                    console.log('[scraper] ✓ Horários do cache (24h)');
+                    horariosDetalhados = cached.horariosDetalhados;
+                    horariosSimplificados = cached.horariosSimplificados;
+                } else {
+                    // Cache expirado, recalcula
+                    horariosDetalhados = interpretSchedule(scheduleRaw);
+                    horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+                    scheduleCache.set(cacheKey, { 
+                        timestamp: now, 
+                        horariosDetalhados, 
+                        horariosSimplificados 
+                    });
+                    console.log('[scraper] ✓ Horários recalculados e cacheados');
+                }
             } else {
-                // Cache expirado, recalcula
+                // Primeiro acesso, calcula e cachea
                 horariosDetalhados = interpretSchedule(scheduleRaw);
                 horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
                 scheduleCache.set(cacheKey, { 
@@ -389,28 +412,10 @@ module.exports = async function handler(req, res) {
                     horariosDetalhados, 
                     horariosSimplificados 
                 });
-                console.log('[scraper] ✓ Horários recalculados e cacheados');
+                console.log('[scraper] ✓ Horários calculados e cacheados');
             }
-        } else {
-            // Primeiro acesso, calcula e cachea
-            horariosDetalhados = interpretSchedule(scheduleRaw);
-            horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
-            scheduleCache.set(cacheKey, { 
-                timestamp: now, 
-                horariosDetalhados, 
-                horariosSimplificados 
-            });
-            console.log('[scraper] ✓ Horários calculados e cacheados');
+            setProgress(clientId, 20, '📚 Portal carregado...');
         }
-        
-        const portalViewState     = extractHiddenFields(portalHtml)['javax.faces.ViewState'];
-        const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
-        const turmas              = extractTurmas(portalHtml);
-
-        console.log(`[scraper] ${turmas.length} turma(s) encontrada(s): ${turmas.map(t => `${t.nome}(${t.idTurma})`).join(', ')}`);
-        console.log(`[scraper] scheduleRaw: ${scheduleRaw.length} disciplina(s) nos horários`);
-
-        setProgress(clientId, 20, '📚 Portal carregado...');
 
         // ── PASSO 3: Para cada turma ──────────────────────────────────────
         const avisosPorDisciplina = [];
