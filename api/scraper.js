@@ -417,6 +417,16 @@ module.exports = async function handler(req, res) {
             setProgress(clientId, 20, '📚 Portal carregado...');
         }
 
+        // ── Extração de turmas, viewState, e formAtuId (independente do skipSchedule) ─
+        const portalViewState     = extractHiddenFields(portalHtml)['javax.faces.ViewState'];
+        const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
+        const turmas              = extractTurmas(portalHtml);
+
+        console.log(`[scraper] ${turmas.length} turma(s) encontrada(s): ${turmas.map(t => `${t.nome}(${t.idTurma})`).join(', ')}`);
+        if (!skipSchedule) {
+            console.log(`[scraper] scheduleRaw: ${scheduleRaw.length} disciplina(s) nos horários`);
+        }
+
         // ── PASSO 3: Para cada turma ──────────────────────────────────────
         const avisosPorDisciplina = [];
 
