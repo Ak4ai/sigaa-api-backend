@@ -66,6 +66,17 @@ function extractHiddenFields(html) {
     return fields;
 }
 
+function detectarNotificacoesAcademicas(html) {
+    const $ = load(html);
+    const notificacao = $('#conteudo > h2').text().trim();
+    
+    if (notificacao.includes('Notificações Acadêmicas')) {
+        console.log('[scraper] ⚠️ Notificações Acadêmicas detectadas - usuário deve acessar o site');
+        return true;
+    }
+    return false;
+}
+
 function decodeHtmlEntities(str) {
     return load(`<x>${str}</x>`)('x').text();
 }
@@ -80,7 +91,10 @@ function extractTurmas(html) {
 
     // 1. Mapa nome base (sem semestre) → idTurma numérico via links do painel formAtualizacoesTurmas
     const nomeToIdTurma = {};
-    $('[onclick]').each((_, el) => {
+    const btnLinks = $('[onclick]');
+    console.log(`[extractTurmas] Total de elementos [onclick]: ${btnLinks.length}`);
+    
+    btnLinks.each((_, el) => {
         const oc = $(el).attr('onclick') || '';
         if (!oc.includes('formAtualizacoesTurmas')) return;
         const mId = oc.match(REGEX_ID_TURMA);
@@ -89,19 +103,24 @@ function extractTurmas(html) {
         if (nomeLink) {
             const nomeBase = nomeLink.replace(REGEX_NOME_BASE, '').trim().toUpperCase();
             nomeToIdTurma[nomeBase] = mId[1];
+            console.log(`[extractTurmas] Mapa: ${nomeBase} → ${mId[1]}`);
         }
     });
 
     // 2. Extrai cada linha com form_acessarTurmaVirtual
-    $('tbody tr').each((_, row) => {
+    const tbodyRows = $('tbody tr');
+    console.log(`[extractTurmas] Total de rows em tbody: ${tbodyRows.length}`);
+    
+    tbodyRows.each((idx, row) => {
         const $row = $(row);
         const form = $row.find('form[id^="form_acessarTurmaVirtual"]').first();
         if (!form.length) return;
-
+        
         const nomeRaw = $row.find('td.descricao a').text().trim()
             || $row.find('td.descricao').text().trim();
         if (!nomeRaw) return;
         const nome = decodeHtmlEntities(nomeRaw);
+        console.log(`[extractTurmas] Disciplina ${idx}: ${nome}`);
 
         // frontEndIdTurma: hash SHA1 no onclick do botão de acesso
         let frontEndIdTurma = null;
@@ -115,20 +134,26 @@ function extractTurmas(html) {
             // Campo do botão: {'form_acessarTurmaVirtualXXX:j_id_YYY':'...','frontEndIdTurma':...}
             const mBtn = oc.match(REGEX_BUTTON_FIELD_KEY);
             if (mBtn) buttonFieldKey = mBtn[1];
+            console.log(`[extractTurmas]   frontEndIdTurma: ${frontEndIdTurma}, buttonFieldKey: ${buttonFieldKey}`);
         });
 
-        if (!frontEndIdTurma || seen.has(frontEndIdTurma)) return;
+        if (!frontEndIdTurma || seen.has(frontEndIdTurma)) {
+            console.log(`[extractTurmas]   ⏭️ Pulando (frontEndIdTurma: ${frontEndIdTurma}, duplicate: ${seen.has(frontEndIdTurma)})`);
+            return;
+        }
         seen.add(frontEndIdTurma);
 
         // idTurma numérico (pode ser null se disciplina não aparece no painel de avisos)
         const nomeBase = nome.replace(REGEX_NOME_BASE, '').trim().toUpperCase();
         const idTurma = nomeToIdTurma[nomeBase] || null;
-
+        
+        console.log(`[extractTurmas]   ✓ Adicionada: idTurma=${idTurma}`);
         turmas.push({ nome, frontEndIdTurma, formId: form.attr('id'), buttonFieldKey, idTurma });
     });
 
     // Fallback: se nada foi encontrado, tenta via formAtualizacoesTurmas (HTML antigo)
     if (turmas.length === 0) {
+        console.log(`[extractTurmas] Tentando fallback REGEX...`);
         const pattern = REGEX_ID_TURMA_FALLBACK;
         let match;
         const seenFb = new Set();
@@ -138,9 +163,11 @@ function extractTurmas(html) {
             seenFb.add(idTurma);
             const nome = decodeHtmlEntities(match[2].trim());
             if (nome) turmas.push({ nome, frontEndIdTurma: null, formId: null, buttonFieldKey: null, idTurma });
+            console.log(`[extractTurmas] Fallback: ${nome} (${idTurma})`);
         }
     }
 
+    console.log(`[extractTurmas] Total retornado: ${turmas.length}`);
     return turmas;
 }
 
@@ -161,7 +188,10 @@ function parseDadosInstitucionais(html) {
     const $ = load(html);
     const obj = {};
 
-    $('#agenda-docente table tbody tr').each((_, row) => {
+    const agendaTable = $('#agenda-docente table tbody tr');
+    console.log(`[parseDadosInstitucionais] #agenda-docente encontrado: ${agendaTable.length} linhas`);
+    
+    agendaTable.each((_, row) => {
         const cols = $(row).find('td');
         if (cols.length === 2) {
             const key = $(cols[0]).text().replace(':', '').trim();
@@ -170,9 +200,13 @@ function parseDadosInstitucionais(html) {
         }
     });
 
-    const nomeUsuario = $('#info-usuario p.usuario span').first().text().trim();
+    const nomeUsuarioElem = $('#info-usuario p.usuario span').first();
+    console.log(`[parseDadosInstitucionais] #info-usuario encontrado: ${nomeUsuarioElem.length > 0 ? 'SIM' : 'NÃO'}`);
+    
+    const nomeUsuario = nomeUsuarioElem.text().trim();
     if (nomeUsuario) obj['Nome do Usuario'] = nomeUsuario;
 
+    console.log(`[parseDadosInstitucionais] Total de campos extraídos: ${Object.keys(obj).length}`);
     return obj;
 }
 
@@ -370,14 +404,32 @@ module.exports = async function handler(req, res) {
         console.log('[scraper] Login OK');
         setProgress(clientId, 10, '🔓 Login realizado...');
 
+        // ── PASSO 1.5: Verificar notificações acadêmicas pendentes ─────────
+        console.log('[scraper] Verificando notificações acadêmicas...');
+        const notificacoesPendentes = detectarNotificacoesAcademicas(loginRes.data);
+        if (notificacoesPendentes) {
+            console.log('[scraper] ⚠️  Notificações acadêmicas bloqueando acesso');
+            return res.status(403).json({
+                error: 'Notificações Acadêmicas Pendentes',
+                type: 'ACADEMIC_NOTIFICATIONS_PENDING',
+                message: 'Você tem notificações acadêmicas pendentes que precisam ser visualizadas no site do SIGAA.',
+                instructions: 'Acesse o site https://sig.cefetmg.br, faça login e visualize as notificações acadêmicas na página inicial. Depois tente novamente.',
+                sigaaUrl: 'https://sig.cefetmg.br/sigaa/logar.do'
+            });
+        }
+        console.log('[scraper] ✓ Sem notificações acadêmicas bloqueantes');
+
         // ── PASSO 2: Portal discente ───────────────────────────────────────
         console.log('[scraper] Carregando portal discente...');
         const portalRes = await client.get('/sigaa/portais/discente/discente.jsf', { headers: BASE_HEADERS });
         const portalHtml = portalRes.data;
 
         const dadosInstitucionais = parseDadosInstitucionais(portalHtml);
+        console.log(`[scraper] dadosInstitucionais: ${JSON.stringify(dadosInstitucionais)} (keys: ${Object.keys(dadosInstitucionais).length})`);
+        
         const scheduleRaw         = parseScheduleRaw(portalHtml);
         const scheduleRawHasCodes = hasScheduleCodesInRaw(scheduleRaw);
+        console.log(`[scraper] scheduleRaw: ${scheduleRaw.length} items`);
         
         // ── CACHE DE HORÁRIOS (24 horas) ou PULAR HORÁRIOS ──────────────────
         let horariosDetalhados, horariosSimplificados;
@@ -456,6 +508,8 @@ module.exports = async function handler(req, res) {
         const portalViewState     = extractHiddenFields(portalHtml)['javax.faces.ViewState'];
         const formAtuId           = extractFormAtualizacoesTurmasId(portalHtml);
         const turmas              = extractTurmas(portalHtml);
+        console.log(`[scraper] extractTurmas() retornou ${turmas.length} turma(s)`);
+        turmas.forEach(t => console.log(`  - ${t.nome} | idTurma: ${t.idTurma} | frontEndIdTurma: ${t.frontEndIdTurma}`));
 
         console.log(`[scraper] ${turmas.length} turma(s) encontrada(s): ${turmas.map(t => `${t.nome}(${t.idTurma})`).join(', ')}`);
         if (!skipSchedule) {
