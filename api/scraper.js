@@ -481,7 +481,6 @@ module.exports = async function handler(req, res) {
         const turmas              = extractTurmas(portalHtml);
 
         console.log(`[scraper] ${turmas.length} turma(s) encontrada(s)`);
-        }
 
         // ── PASSO 3: Para cada turma ──────────────────────────────────────
         const avisosPorDisciplina = [];
