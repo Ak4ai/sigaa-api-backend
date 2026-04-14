@@ -42,10 +42,16 @@ const REGEX_FORM_MENU_AVA_ID_ALT = /formMenu:j_id_jsp_(\d+)_69/;
 const REGEX_AULAS_DEFINIDAS = /Número de Aulas definidas pela CH do Componente:\s*(\d+)/i;
 const REGEX_PORCENTAGEM_FREQ = /Porcentagem de Frequência em relação a CH:\s*(\d+)%/i;
 const REGEX_DATA_AULA = /\d{2}\/\d{2}\/\d{4}/;
+const REGEX_SCHEDULE_CODE = /\d+[MTN]\d+/;
 
 // ── CACHE DE HORÁRIOS (não muda a cada 6 meses) ────────────────────────────
 const scheduleCache = new Map(); // user → { timestamp, data }
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 horas
+
+function hasScheduleCodesInRaw(scheduleRaw) {
+    if (!Array.isArray(scheduleRaw) || scheduleRaw.length === 0) return false;
+    return scheduleRaw.some(item => REGEX_SCHEDULE_CODE.test(String(item?.rawCodes || '')));
+}
 
 // ── Helpers de extração ─────────────────────────────────────────────────────
 
@@ -371,6 +377,7 @@ module.exports = async function handler(req, res) {
 
         const dadosInstitucionais = parseDadosInstitucionais(portalHtml);
         const scheduleRaw         = parseScheduleRaw(portalHtml);
+        const scheduleRawHasCodes = hasScheduleCodesInRaw(scheduleRaw);
         
         // ── CACHE DE HORÁRIOS (24 horas) ou PULAR HORÁRIOS ──────────────────
         let horariosDetalhados, horariosSimplificados;
@@ -389,30 +396,58 @@ module.exports = async function handler(req, res) {
             if (scheduleCache.has(cacheKey)) {
                 const cached = scheduleCache.get(cacheKey);
                 if (now - cached.timestamp < CACHE_DURATION) {
-                    console.log('[scraper] ✓ Horários do cache (24h)');
-                    horariosDetalhados = cached.horariosDetalhados;
-                    horariosSimplificados = cached.horariosSimplificados;
+                    const cachedIsEmpty = !Array.isArray(cached.horariosSimplificados) || cached.horariosSimplificados.length === 0;
+                    if (cachedIsEmpty && scheduleRawHasCodes) {
+                        console.warn('[scraper] Cache vazio ignorado: portal atual possui códigos de horário. Recalculando...');
+                        horariosDetalhados = interpretSchedule(scheduleRaw);
+                        horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
+
+                        if (horariosSimplificados.length > 0) {
+                            scheduleCache.set(cacheKey, {
+                                timestamp: now,
+                                horariosDetalhados,
+                                horariosSimplificados
+                            });
+                            console.log('[scraper] ✓ Horários recalculados e cache atualizado');
+                        } else {
+                            console.warn('[scraper] Recalculo retornou vazio apesar de códigos no portal; cache não atualizado.');
+                        }
+                    } else {
+                        console.log('[scraper] ✓ Horários do cache (24h)');
+                        horariosDetalhados = cached.horariosDetalhados;
+                        horariosSimplificados = cached.horariosSimplificados;
+                    }
                 } else {
                     // Cache expirado, recalcula
                     horariosDetalhados = interpretSchedule(scheduleRaw);
                     horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
-                    scheduleCache.set(cacheKey, { 
-                        timestamp: now, 
-                        horariosDetalhados, 
-                        horariosSimplificados 
-                    });
-                    console.log('[scraper] ✓ Horários recalculados e cacheados');
+
+                    if (horariosSimplificados.length > 0 || !scheduleRawHasCodes) {
+                        scheduleCache.set(cacheKey, {
+                            timestamp: now,
+                            horariosDetalhados,
+                            horariosSimplificados
+                        });
+                        console.log('[scraper] ✓ Horários recalculados e cacheados');
+                    } else {
+                        console.warn('[scraper] Horários vazios com códigos no portal; cache não atualizado.');
+                    }
                 }
             } else {
                 // Primeiro acesso, calcula e cachea
                 horariosDetalhados = interpretSchedule(scheduleRaw);
                 horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
-                scheduleCache.set(cacheKey, { 
-                    timestamp: now, 
-                    horariosDetalhados, 
-                    horariosSimplificados 
-                });
-                console.log('[scraper] ✓ Horários calculados e cacheados');
+
+                if (horariosSimplificados.length > 0 || !scheduleRawHasCodes) {
+                    scheduleCache.set(cacheKey, {
+                        timestamp: now,
+                        horariosDetalhados,
+                        horariosSimplificados
+                    });
+                    console.log('[scraper] ✓ Horários calculados e cacheados');
+                } else {
+                    console.warn('[scraper] Horários vazios com códigos no portal; cache não criado.');
+                }
             }
             setProgress(clientId, 20, '📚 Portal carregado...');
         }
