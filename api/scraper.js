@@ -53,7 +53,7 @@ const entityCache = new Map(); // str → decodedStr
 
 function hasScheduleCodesInRaw(scheduleRaw) {
     if (!Array.isArray(scheduleRaw) || scheduleRaw.length === 0) return false;
-    return scheduleRaw.some(item => REGEX_SCHEDULE_CODE.test(String(item?.rawCodes || '')));
+    return scheduleRaw.some(item => REGEX_SCHEDULE_CODE.test(item?.rawCodes || ''));
 }
 
 // ── Helpers de extração ─────────────────────────────────────────────────────
@@ -298,14 +298,27 @@ function parseNotas(html) {
         if (tds.length) valores.push(tds);
     });
 
-    // Avaliações detalhadas (peso, nota máxima, abrev, denominação)
+    // Avaliações detalhadas: cache inputs antes do loop (otimização - evita busca O(n) por ID)
+    const inputCache = {};
+    $('input[id^="abrevAval_"], input[id^="denAval_"], input[id^="notaAval_"], input[id^="pesoAval_"]')
+        .each((_, el) => {
+            const $el = $(el);
+            const id = $el.attr('id').match(/_([^_]+)$/)?.[1];
+            if (!id) return;
+            inputCache[id] ??= {};
+            const type = $el.attr('id').split('_')[0];
+            inputCache[id][type] = $el.val();
+        });
+
+    // Montar avaliações usando cache (sem buscar por ID a cada iteração)
     const avaliacoes = [];
     $('table.tabelaRelatorio thead tr#trAval th[id^="aval_"]').each((_, th) => {
         const id = $(th).attr('id').replace('aval_', '');
-        const abrev = $(`#abrevAval_${id}`).val() || $(th).text().trim();
-        const den   = $(`#denAval_${id}`).val()   || abrev;
-        const nota  = $(`#notaAval_${id}`).val()  || '';
-        const peso  = $(`#pesoAval_${id}`).val()  || '';
+        const cache = inputCache[id] || {};
+        const abrev = cache.abrevAval || $(th).text().trim();
+        const den   = cache.denAval   || abrev;
+        const nota  = cache.notaAval  || '';
+        const peso  = cache.pesoAval  || '';
         avaliacoes.push({ abrev, den, nota, peso });
     });
 
@@ -436,7 +449,6 @@ module.exports = async function handler(req, res) {
                 if (now - cached.timestamp < CACHE_DURATION) {
                     const cachedIsEmpty = !Array.isArray(cached.horariosSimplificados) || cached.horariosSimplificados.length === 0;
                     if (cachedIsEmpty && scheduleRawHasCodes) {
-                        console.warn('[scraper] Cache vazio ignorado: portal atual possui códigos de horário. Recalculando...');
                         horariosDetalhados = interpretSchedule(scheduleRaw);
                         horariosSimplificados = gerarTabelaSimplificada(horariosDetalhados);
 
@@ -446,12 +458,8 @@ module.exports = async function handler(req, res) {
                                 horariosDetalhados,
                                 horariosSimplificados
                             });
-                            console.log('[scraper] ✓ Horários recalculados e cache atualizado');
-                        } else {
-                            console.warn('[scraper] Recalculo retornou vazio apesar de códigos no portal; cache não atualizado.');
                         }
                     } else {
-                        console.log('[scraper] ✓ Horários do cache (24h)');
                         horariosDetalhados = cached.horariosDetalhados;
                         horariosSimplificados = cached.horariosSimplificados;
                     }
@@ -466,9 +474,6 @@ module.exports = async function handler(req, res) {
                             horariosDetalhados,
                             horariosSimplificados
                         });
-                        console.log('[scraper] ✓ Horários recalculados e cacheados');
-                    } else {
-                        console.warn('[scraper] Horários vazios com códigos no portal; cache não atualizado.');
                     }
                 }
             } else {
@@ -482,9 +487,6 @@ module.exports = async function handler(req, res) {
                         horariosDetalhados,
                         horariosSimplificados
                     });
-                    console.log('[scraper] ✓ Horários calculados e cacheados');
-                } else {
-                    console.warn('[scraper] Horários vazios com códigos no portal; cache não criado.');
                 }
             }
             setProgress(clientId, 20, '📚 Portal carregado...');
@@ -546,17 +548,30 @@ module.exports = async function handler(req, res) {
                 continue;
             }
 
-            // 3b: Frequência
+            // 3b & 3c: Frequência e Notas (PARALELO dentro da turma - mesmo avaViewState)
             const freqPayload = new URLSearchParams();
             freqPayload.set('formMenu', 'formMenu');
             freqPayload.set(`formMenu:j_id_jsp_${avaMenuId}_69`, `formMenu:j_id_jsp_${avaMenuId}_92`);
             freqPayload.set(`formMenu:j_id_jsp_${avaMenuId}_95`, `formMenu:j_id_jsp_${avaMenuId}_95`);
             freqPayload.set('javax.faces.ViewState', avaViewState);
 
-            const freqRes = await client.post('/sigaa/ava/index.jsf', freqPayload.toString(), {
-                headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
-            });
+            const notasPayload = new URLSearchParams();
+            notasPayload.set('formMenu', 'formMenu');
+            notasPayload.set(`formMenu:j_id_jsp_${avaMenuId}_97`, `formMenu:j_id_jsp_${avaMenuId}_97`);
+            notasPayload.set('javax.faces.ViewState', avaViewState);
+
+            // Ambas requisições rodam em paralelo (mesmo avaViewState, sem conflito)
+            const [freqRes, notasRes] = await Promise.all([
+                client.post('/sigaa/ava/index.jsf', freqPayload.toString(), {
+                    headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
+                }),
+                client.post('/sigaa/ava/index.jsf', notasPayload.toString(), {
+                    headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
+                }),
+            ]);
+
             const freqHtml = freqRes.data;
+            const notasHtml = notasRes.data;
 
             const frequenciaNaoLancada = freqHtml.includes('A frequência ainda não foi lançada.');
             let frequencia = [];
@@ -569,17 +584,6 @@ module.exports = async function handler(req, res) {
                 numeroAulasDefinidas = stats.numeroAulasDefinidas;
                 porcentagemFrequencia = stats.porcentagemFrequencia;
             }
-
-            // 3c: Notas
-            const notasPayload = new URLSearchParams();
-            notasPayload.set('formMenu', 'formMenu');
-            notasPayload.set(`formMenu:j_id_jsp_${avaMenuId}_97`, `formMenu:j_id_jsp_${avaMenuId}_97`);
-            notasPayload.set('javax.faces.ViewState', avaViewState);
-
-            const notasRes = await client.post('/sigaa/ava/index.jsf', notasPayload.toString(), {
-                headers: { ...BASE_HEADERS, Referer: `${BASE_URL}/sigaa/ava/index.jsf` },
-            });
-            const notasHtml = notasRes.data;
 
             let notas;
             if (notasHtml.includes('Ainda não foram lançadas notas.')) {
