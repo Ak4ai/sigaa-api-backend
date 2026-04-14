@@ -497,7 +497,7 @@ module.exports = async function handler(req, res) {
 
         console.log(`[scraper] ${turmas.length} turma(s) encontrada(s)`);
 
-        // ── PASSO 3: Para cada turma ──────────────────────────────────────
+        // ── PASSO 3: Para cada turma (SEQUENCIAL - SIGAA não permite paralelismo por ViewState) ──
         const avisosPorDisciplina = [];
 
         for (let i = 0; i < turmas.length; i++) {
