@@ -48,6 +48,9 @@ const REGEX_SCHEDULE_CODE = /\d+[MTN]\d+/;
 const scheduleCache = new Map(); // user → { timestamp, data }
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 horas
 
+// ── CACHE DE ENTIDADES HTML (para decodificação rápida) ────────────────────
+const entityCache = new Map(); // str → decodedStr
+
 function hasScheduleCodesInRaw(scheduleRaw) {
     if (!Array.isArray(scheduleRaw) || scheduleRaw.length === 0) return false;
     return scheduleRaw.some(item => REGEX_SCHEDULE_CODE.test(String(item?.rawCodes || '')));
@@ -78,7 +81,19 @@ function detectarNotificacoesAcademicas(html) {
 }
 
 function decodeHtmlEntities(str) {
-    return load(`<x>${str}</x>`)('x').text();
+    // Verificar cache primeiro
+    if (entityCache.has(str)) {
+        return entityCache.get(str);
+    }
+    // Se não está em cache, decodificar e armazenar
+    const decoded = load(`<x>${str}</x>`)('x').text();
+    entityCache.set(str, decoded);
+    return decoded;
+}
+
+// Função auxiliar para debug: mostrar stats do cache de entidades
+function getEntityCacheStats() {
+    return { size: entityCache.size };
 }
 
 function extractTurmas(html) {
@@ -588,6 +603,10 @@ module.exports = async function handler(req, res) {
 
         console.log('[scraper] Concluído');
         setProgress(clientId, 100, '✅ Concluído!');
+        
+        // Log de stats do cache
+        const cacheStats = getEntityCacheStats();
+        console.log(`[scraper] 💾 Cache de entidades HTML: ${cacheStats.size} strings cacheadas`);
         
         return res.status(200).json({
             dadosInstitucionais,
