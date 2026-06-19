@@ -19,6 +19,7 @@
   "homepage": "https://github.com/Ak4ai/sigaa-api-backend#readme",
   "description": "",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@sparticuz/chromium": "^133.0.0",
     "axios": "^1.14.0",
     "cheerio": "^1.2.0",
