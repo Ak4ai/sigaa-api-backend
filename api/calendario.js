@@ -2,9 +2,8 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const https = require('https');
 
-// Cache em memória para evitar requisições excessivas à página externa
-let cachedLink = null;
-let lastFetched = 0;
+// Cache em memória para evitar requisições excessivas à página externa (separado por curso)
+const cache = {};
 const CACHE_DURATION = 1 * 60 * 60 * 1000; // 1 hora de cache
 
 module.exports = async function handler(req, res) {
@@ -17,17 +16,20 @@ module.exports = async function handler(req, res) {
         return res.status(200).end();
     }
 
-    const targetUrl = 'https://www.eng-computacao.divinopolis.cefetmg.br/2019/03/18/calendario-letivo/';
+    const curso = req.query.curso === 'mecatronica' ? 'mecatronica' : 'computacao';
+    const targetUrl = curso === 'mecatronica'
+        ? 'https://www.eng-mecatronica.divinopolis.cefetmg.br/calendario-letivo/'
+        : 'https://www.eng-computacao.divinopolis.cefetmg.br/2019/03/18/calendario-letivo/';
 
     // Verifica se temos no cache e ainda está válido
     const now = Date.now();
-    if (cachedLink && (now - lastFetched < CACHE_DURATION)) {
-        console.log('[CALENDARIO] Retornando link do cache:', cachedLink);
-        return res.status(200).json({ link: cachedLink });
+    if (cache[curso] && (now - cache[curso].lastFetched < CACHE_DURATION)) {
+        console.log(`[CALENDARIO] [${curso}] Retornando link do cache:`, cache[curso].link);
+        return res.status(200).json({ link: cache[curso].link });
     }
 
     try {
-        console.log('[CALENDARIO] Buscando calendário da página externa...');
+        console.log(`[CALENDARIO] [${curso}] Buscando calendário da página externa...`);
         const response = await axios.get(targetUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -41,23 +43,38 @@ module.exports = async function handler(req, res) {
         const html = response.data;
         const $ = cheerio.load(html);
         
-        // Procura pelo primeiro link dentro de ul.wp-block-list
-        const primeiroLink = $('ul.wp-block-list a').first().attr('href');
+        // Tenta primeiro o seletor padrão (primeiro link dentro de ul.wp-block-list)
+        let primeiroLink = $('ul.wp-block-list a').first().attr('href');
+
+        // Se não encontrar, tenta buscar o primeiro link para um PDF que tenha a palavra "calendário" no texto
+        if (!primeiroLink) {
+            $('a').each((i, el) => {
+                const href = $(el).attr('href');
+                const text = $(el).text().trim();
+                if (href && href.toLowerCase().includes('.pdf') && (text.toLowerCase().includes('calendário') || text.toLowerCase().includes('calendario'))) {
+                    if (!primeiroLink) {
+                        primeiroLink = href;
+                    }
+                }
+            });
+        }
 
         if (primeiroLink) {
-            cachedLink = primeiroLink;
-            lastFetched = now;
-            console.log('[CALENDARIO] Link encontrado e cacheado:', cachedLink);
-            return res.status(200).json({ link: cachedLink });
+            cache[curso] = {
+                link: primeiroLink,
+                lastFetched: now
+            };
+            console.log(`[CALENDARIO] [${curso}] Link encontrado e cacheado:`, primeiroLink);
+            return res.status(200).json({ link: primeiroLink });
         } else {
-            console.warn('[CALENDARIO] Elemento ul.wp-block-list a não encontrado no HTML.');
+            console.warn(`[CALENDARIO] [${curso}] Link do PDF do calendário não encontrado no HTML.`);
             // Retorna a página de calendários como fallback caso não ache o PDF direto
             return res.status(200).json({ link: targetUrl, isFallback: true });
         }
     } catch (error) {
-        console.error('[CALENDARIO] Erro ao buscar calendário dinâmico:', error.message);
+        console.error(`[CALENDARIO] [${curso}] Erro ao buscar calendário dinâmico:`, error.message);
         // Em caso de erro, retorna o cachedLink anterior se existir, senão retorna o link padrão
-        const fallbackLink = cachedLink || targetUrl;
+        const fallbackLink = (cache[curso] && cache[curso].link) || targetUrl;
         return res.status(200).json({ link: fallbackLink, error: error.message, isFallback: true });
     }
 };
