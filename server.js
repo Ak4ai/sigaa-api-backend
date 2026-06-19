@@ -7,16 +7,21 @@ const fs = require('fs');
 const loginHandler = require('./api/login');
 const scraperHandler = require('./api/scraper');
 const calendarioHandler = require('./api/calendario');
+const calendarioEventosHandler = require('./api/calendario-eventos');
+const { atualizarCalendariosBackground } = require('./api/cron-calendario');
 const { getProgress } = require('./api/progress');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Diretório do frontend
-const FRONTEND_DIR = path.resolve(
+let FRONTEND_DIR = path.resolve(
     __dirname,
     '../teste_api_sigaa/sigaa-test/Sigaa-API-webapp'
 );
+if (!fs.existsSync(FRONTEND_DIR)) {
+    FRONTEND_DIR = path.resolve(__dirname, '../Sigaa-API-webapp');
+}
 
 // CORS global — deve vir ANTES de qualquer outro middleware
 app.use((req, res, next) => {
@@ -109,6 +114,7 @@ app.all('/api/login', (req, res) => loginHandler(req, res));
 
 // Rota de calendário dinâmico
 app.all('/api/calendario', (req, res) => calendarioHandler(req, res));
+app.all('/api/calendario/eventos', (req, res) => calendarioEventosHandler(req, res));
 
 // Rota de scraper — com fila
 app.all('/api/scraper', async (req, res) => {
@@ -162,6 +168,12 @@ app.get('/', (req, res) => {
 
 // Serve arquivos estáticos do frontend (css, js, imagens)
 app.use(express.static(FRONTEND_DIR));
+
+// Agendador diário para verificar e atualizar calendários (24 horas)
+const CRON_INTERVAL_MS = 24 * 60 * 60 * 1000;
+setInterval(atualizarCalendariosBackground, CRON_INTERVAL_MS);
+// Executa uma checagem inicial após 10 segundos ao ligar o servidor
+setTimeout(atualizarCalendariosBackground, 10000);
 
 app.listen(PORT, () => {
     console.log(`\n✅ Servidor rodando em http://localhost:${PORT}`);
