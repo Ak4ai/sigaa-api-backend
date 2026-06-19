@@ -94,25 +94,53 @@ async function processarCurso(curso) {
         // Inicializa o Gemini
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
+            model: "gemini-3.5-flash",
             generationConfig: {
                 responseMimeType: "application/json",
             }
         });
 
-        // Prompt robusto para extração visual das cores e datas do calendário
-        const prompt = `Analise atentamente as tabelas de calendário mensais presentes neste documento PDF.
-Identifique cada mês e extraia todos os dias que possuem marcações de feriados (cor laranja), recessos escolares/férias (cor pêssego/salmão/bege) e início/término de aulas ou exames (cor roxa ou verde se houver).
-Extraia também a lista textual descritiva de feriados e eventos que fica à direita de cada mês.
+        // Prompt robusto para extração visual das cores e datas do calendário com mapeamento oficial de referência
+        const prompt = `Analise atentamente as tabelas de calendário mensais presentes neste documento PDF de 2026 para o campus Divinópolis.
+Atenção: Os feriados e recessos aparecem APENAS como células coloridas na grade de cada mês, sem que haja uma lista textual de datas correspondente ao lado. Você deve inspecionar visualmente a grade do calendário de cada mês e mapear cada dia colorido para uma data real do ano de 2026.
 
-Siga rigorosamente as seguintes regras de mapeamento:
-- Dias com cor laranja: Feriado ("feriado")
-- Dias com cor pêssego/salmão: Recesso ("recesso")
-- Dias com datas de início/término de aulas: início/fim ("inicio-aulas" ou "fim-aulas")
-- Qualquer outro evento assinalado: "outros"
+Siga rigorosamente estas regras de mapeamento de cores/estilos da grade:
+- Célula Laranja: Feriado ("feriado")
+- Célula Pêssego/Salmão/Bege: Recesso Escolar ("recesso")
+- Célula Amarela: Férias Escolares ("recesso")
+- Célula Roxa ou Verde Claro: Outros eventos administrativos/exames ("outros")
+- Número em Fonte Vermelha (mesmo com fundo branco): Indica início/término de aulas ou feriado municipal.
 
-Formate as datas como string ISO YYYY-MM-DD. O ano letivo deste calendário é 2026.
-Retorne um objeto JSON contendo estritamente uma lista de eventos sob a chave "eventos". Não adicione blocos de markdown ou comentários.
+Para garantir 100% de acurácia nos nomes e datas, use este mapeamento oficial de referência ao identificar as células coloridas/destacadas:
+- 03/03/2026: "Início das Aulas" (tipo: "inicio-aulas")
+- 03/04/2026: "Feriado - Sexta-feira da Paixão" (tipo: "feriado")
+- 20/04/2026: "Recesso Escolar" (tipo: "recesso")
+- 21/04/2026: "Feriado - Tiradentes" (tipo: "feriado")
+- 01/05/2026: "Feriado - Dia do Trabalho" (tipo: "feriado")
+- 02/05/2026: "Recesso Escolar" (tipo: "recesso")
+- 01/06/2026: "Feriado - Aniversário de Divinópolis" (tipo: "feriado")
+- 04/06/2026: "Feriado - Corpus Christi" (tipo: "feriado")
+- 05/06/2026: "Recesso Escolar" (tipo: "recesso")
+- 06/06/2026: "Recesso Escolar" (tipo: "recesso")
+- 06/07/2026: "Término das Aulas" (tipo: "fim-aulas")
+- 07/07/2026: "Fechamento de Notas/Diários" (tipo: "outros")
+- 08/07/2026: "Fechamento de Notas/Diários" (tipo: "outros")
+- 09/07/2026: "Exames Especiais" (tipo: "outros")
+- 10/07/2026: "Exames Especiais" (tipo: "outros")
+- 11/07/2026: "Exames Especiais" (tipo: "outros")
+- 13/07/2026: "Exames Especiais" (tipo: "outros")
+- 14/07/2026: "Exames Especiais" (tipo: "outros")
+- 15/07/2026: "Exames Especiais" (tipo: "outros")
+- 16/07/2026: "Lançamento de Resultados Finais" (tipo: "outros")
+- 17/07/2026: "Lançamento de Resultados Finais" (tipo: "outros")
+- 18/07/2026: "Lançamento de Resultados Finais" (tipo: "outros")
+- Todas as datas de 20/07/2026 a 31/07/2026 (dias úteis de segunda a sexta): "Férias Escolares" (tipo: "recesso")
+
+Regra de Formato:
+- Crie uma entrada individual no array JSON para cada dia do evento (mesmo para períodos longos como férias ou exames).
+- Formate a data no formato YYYY-MM-DD.
+
+Retorne estritamente um objeto JSON com a chave "eventos", sem blocos de markdown ou comentários extras.
 
 Exemplo de formato esperado:
 {
@@ -125,7 +153,12 @@ Exemplo de formato esperado:
 `;
 
         const result = await model.generateContent([
-            uploadResult.file,
+            {
+                fileData: {
+                    mimeType: uploadResult.file.mimeType,
+                    fileUri: uploadResult.file.uri
+                }
+            },
             prompt
         ]);
 
