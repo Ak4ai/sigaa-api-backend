@@ -6,6 +6,7 @@ const express = require('express');
 const fs = require('fs');
 const loginHandler = require('./api/login');
 const scraperHandler = require('./api/scraper');
+const calendarioHandler = require('./api/calendario');
 const { getProgress } = require('./api/progress');
 
 const app = express();
@@ -105,6 +106,9 @@ app.get('/api/scraper-progress', (req, res) => {
 
 // Rota de login
 app.all('/api/login', (req, res) => loginHandler(req, res));
+
+// Rota de calendário dinâmico
+app.all('/api/calendario', (req, res) => calendarioHandler(req, res));
 
 // Rota de scraper — com fila
 app.all('/api/scraper', async (req, res) => {
