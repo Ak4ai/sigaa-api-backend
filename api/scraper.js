@@ -416,8 +416,8 @@ module.exports = async function handler(req, res) {
                 error: 'Notificações Acadêmicas Pendentes',
                 type: 'ACADEMIC_NOTIFICATIONS_PENDING',
                 message: 'Você tem notificações acadêmicas pendentes que precisam ser visualizadas no site do SIGAA.',
-                instructions: 'Acesse o site https://sig.cefetmg.br, faça login e visualize as notificações acadêmicas na página inicial. Depois tente novamente.',
-                sigaaUrl: 'https://sig.cefetmg.br/sigaa/logar.do'
+                instructions: 'Acesse o site https://sig.cefetmg.br/sigaa/verTelaLogin.do, faça login e visualize as notificações acadêmicas na página inicial. Depois tente novamente.',
+                sigaaUrl: 'https://sig.cefetmg.br/sigaa/verTelaLogin.do'
             });
         }
 
