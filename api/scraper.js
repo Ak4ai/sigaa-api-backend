@@ -246,6 +246,60 @@ function parseAvisos(html) {
     return avisos;
 }
 
+// Extrai atividades do painel de avaliações do portal discente
+function parseAvaliacaoPortal(html) {
+    const $ = load(html);
+    const panel = $('#avaliacao-portal');
+    if (!panel.length) return [];
+
+    const atividades = [];
+    panel.find('tbody tr').each((_, tr) => {
+        const $tr = $(tr);
+        // Ignora linhas de semestre (como a que tem colspan)
+        if ($tr.find('td[colspan]').length) return;
+
+        const tds = $tr.find('td');
+        if (tds.length < 3) return;
+
+        // 1. Icone / Status
+        const img = $(tds[0]).find('img');
+        const iconSrc = img.attr('src') || '';
+        const iconTitle = img.attr('title') || '';
+        const concluida = iconSrc.includes('check.png') || iconTitle.toLowerCase().includes('concluída');
+
+        // 2. Data (Limpa e formata: remove (X dias), quebras de linha e espaços múltiplos)
+        let dataText = $(tds[1]).text().replace(/\(\d+\s*dia[s]?\)/i, '').replace(/\s+/g, ' ').trim();
+
+        // 3. Atividade / Disciplina / Descrição
+        const tdAtividade = $(tds[2]);
+        const small = tdAtividade.find('small');
+        if (!small.length) return;
+
+        let smallHtml = small.html() || '';
+        let disciplina = '';
+        const parts = smallHtml.split(/<br\s*\/?>/i);
+        if (parts.length > 0) {
+            disciplina = load(`<x>${parts[0]}</x>`)('x').text().trim();
+        }
+
+        const tipo = small.find('strong').text().replace(':', '').trim();
+        const link = small.find('a');
+        const descText = link.text().trim();
+
+        if (disciplina && descText) {
+            atividades.push({
+                disciplina,
+                data: dataText,
+                descricao: `[${tipo || 'Atividade'}] ${descText}`,
+                entregaMarcada: true,
+                concluida
+            });
+        }
+    });
+
+    return atividades;
+}
+
 // Extrai registros de frequência (tr.linhaImpar / tr.linhaPar com data DD/MM/YYYY)
 function parseFrequencia(html) {
     const $ = load(html);
@@ -612,11 +666,16 @@ module.exports = async function handler(req, res) {
         const cacheStats = getEntityCacheStats();
         console.log(`[scraper] 💾 Cache de entidades HTML: ${cacheStats.size} strings cacheadas`);
         
+        // Extrair atividades com entrega marcada se for graduação ou se o painel estiver presente
+        const isGraduacao = String(dadosInstitucionais['Nível'] || '').toUpperCase().includes('GRAD') || portalHtml.includes('id="avaliacao-portal"');
+        const atividadesPortal = isGraduacao ? parseAvaliacaoPortal(portalHtml) : [];
+
         return res.status(200).json({
             dadosInstitucionais,
             horariosDetalhados,
             horariosSimplificados,
             avisosPorDisciplina,
+            atividadesPortal,
         });
 
     } catch (error) {
