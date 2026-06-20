@@ -669,6 +669,7 @@ module.exports = async function handler(req, res) {
         // Extrair atividades com entrega marcada se for graduação ou se o painel estiver presente
         const isGraduacao = String(dadosInstitucionais['Nível'] || '').toUpperCase().includes('GRAD') || portalHtml.includes('id="avaliacao-portal"');
         const atividadesPortal = isGraduacao ? parseAvaliacaoPortal(portalHtml) : [];
+        console.log(`[scraper] 📋 Atividades extraídas do portal: ${atividadesPortal.length} itens.`);
 
         return res.status(200).json({
             dadosInstitucionais,
