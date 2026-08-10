@@ -416,7 +416,7 @@ module.exports = async function handler(req, res) {
         baseURL: BASE_URL,
         validateStatus: () => true,
         decompress: true,
-        timeout: 12000,
+        timeout: 30000,
         httpsAgent: new https.Agent({ rejectUnauthorized: false }),
     });
 
