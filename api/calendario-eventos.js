@@ -1,96 +1,34 @@
-const fs = require('fs');
-const path = require('path');
-
-module.exports = function handler(req, res) {
-    // CORS headers
+const exams = require('../lib/manual-exams');
+const { validarTokenLogin } = require('./auth');
+const { createRateLimiter } = require('../lib/request-protection');
+const writeLimit = createRateLimiter({ limit: 20, windowMs: 60000 });
+module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    const curso = req.query.curso === 'mecatronica' ? 'mecatronica' : 'computacao';
-
-    // POST: Salvar nova data de prova
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: 'Método não permitido.' });
     if (req.method === 'POST') {
-        try {
-            const { disciplina, data, titulo } = req.body;
-            if (!disciplina || !data || !titulo) {
-                return res.status(400).json({ error: 'Parâmetros inválidos. Preencha todos os campos.' });
-            }
-
-            const cacheDir = path.resolve(__dirname, '../cache');
-            if (!fs.existsSync(cacheDir)) {
-                fs.mkdirSync(cacheDir, { recursive: true });
-            }
-
-            const customExamsPath = path.join(cacheDir, `provas_${curso}.json`);
-            let customExams = [];
-            if (fs.existsSync(customExamsPath)) {
-                try {
-                    customExams = JSON.parse(fs.readFileSync(customExamsPath, 'utf8'));
-                } catch (e) {
-                    console.error('Erro ao ler provas para salvar:', e.message);
-                }
-            }
-
-            // Evita duplicados exatos
-            const exists = customExams.some(e => e.disciplina === disciplina && e.data === data && e.titulo === titulo);
-            if (!exists) {
-                customExams.push({
-                    data,
-                    titulo,
-                    disciplina,
-                    tipo: 'prova'
-                });
-                fs.writeFileSync(customExamsPath, JSON.stringify(customExams, null, 2), 'utf8');
-            }
-
-            return res.status(200).json({ success: true, message: 'Prova adicionada com sucesso!' });
-        } catch (error) {
-            console.error('Erro ao adicionar prova:', error);
-            return res.status(500).json({ error: 'Erro interno ao salvar prova.' });
-        }
+        let admitted = false;
+        writeLimit(req, res, () => { admitted = true; });
+        if (!admitted) return;
     }
-
-    // GET: Listar todos os eventos (letivo + provas)
-    if (req.method === 'GET') {
-        try {
-            const cacheDir = path.resolve(__dirname, '../cache');
-            
-            // 1. Carrega eventos letivos do curso
-            const letivosPath = path.join(cacheDir, `calendario_${curso}.json`);
-            let letivos = [];
-            if (fs.existsSync(letivosPath)) {
-                try {
-                    const content = JSON.parse(fs.readFileSync(letivosPath, 'utf8'));
-                    letivos = content.eventos || content || [];
-                } catch (e) {
-                    console.error('Erro ao ler calendario letivo:', e.message);
-                }
-            }
-
-            // 2. Carrega provas salvas
-            const customExamsPath = path.join(cacheDir, `provas_${curso}.json`);
-            let customExams = [];
-            if (fs.existsSync(customExamsPath)) {
-                try {
-                    customExams = JSON.parse(fs.readFileSync(customExamsPath, 'utf8'));
-                } catch (e) {
-                    console.error('Erro ao ler provas:', e.message);
-                }
-            }
-
-            // 3. Mescla tudo e retorna
-            const eventos = [...letivos, ...customExams];
-            return res.status(200).json({ eventos });
-        } catch (error) {
-            console.error('Erro ao listar eventos:', error);
-            return res.status(500).json({ error: 'Erro interno ao carregar eventos.' });
+    try {
+        const token = /^Bearer ([^ ]+)$/i.exec(req.headers.authorization || '')?.[1];
+        if (token && !await validarTokenLogin(token)) return res.status(401).json({ error: 'Sessão expirada. Entre novamente.' });
+        const access = await exams.getAccess(token);
+        if (req.method === 'POST') {
+            if (!token) return res.status(401).json({ error: 'Entre na sua conta para cadastrar provas.' });
+            if (!access) return res.status(403).json({ error: 'Atualize seus dados no SIGAA para confirmar suas turmas.' });
+            const result = exams.add(access, req.body || {});
+            return res.status(result.status).json(result);
         }
+        const course = req.query.curso === 'mecatronica' ? 'mecatronica' : 'computacao';
+        const result = exams.list(access, course);
+        return res.status(200).json({ eventos: [...exams.officialEvents(course), ...result.eventos], turmas: result.turmas, precisaAtualizar: !access });
+    } catch (error) {
+        console.error('[manual-exams] Falha no armazenamento:', error.code || error.name);
+        return res.status(503).json({ error: 'Calendário temporariamente indisponível.' });
     }
-
-    return res.status(405).json({ error: 'Método não permitido.' });
 };

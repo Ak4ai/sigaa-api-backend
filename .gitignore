@@ -42,3 +42,5 @@ temp/
 .vscode/
 *.swp
 *.swo
+
+data/exams/

@@ -1,3 +1,4 @@
+const { recordAcademicAccess } = require('../lib/manual-exams');
 // scraper.js — implementação axios+cheerio substituindo Puppeteer
 // Mantém exatamente o mesmo contrato de resposta JSON:
 // { dadosInstitucionais, horariosDetalhados, horariosSimplificados, avisosPorDisciplina }
@@ -392,7 +393,10 @@ async function handler(req, res) {
 
         console.log('[scraper] Concluído');
         req.scrapeSignal?.throwIfAborted();
+        const academicAccess = !load(portalHtml)('input[type="password"]').length
+            ? await recordAcademicAccess(req.body.token, dadosInstitucionais, scheduleRaw, turmas) : null;
         return res.status(200).json({
+            ...academicAccess,
             dadosInstitucionais,
             horariosDetalhados,
             horariosSimplificados,
