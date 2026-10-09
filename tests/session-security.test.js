@@ -20,8 +20,9 @@ test('opaque sessions persist encrypted on the server and logout deletes only th
  assert.match(id,/^s3_[A-Za-z0-9_-]{43}$/);assert.notEqual(id,other);
  assert.deepEqual(payload,{user:'sensitive-test-user',pass:'sensitive-test-password'});
  assert.equal((await auth.validarTokenLogin(id)).pass,payload.pass);
- const disk=fs.readdirSync(process.env.SESSION_DATA_DIR).filter(n=>n.startsWith('sessions.sqlite')).map(n=>fs.readFileSync(path.join(process.env.SESSION_DATA_DIR,n))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0));
- for(const secret of [payload.user,payload.pass,id])assert.ok(!disk.includes(Buffer.from(secret)));
+ // Reading/closing the SQLite file in its owner process can release POSIX locks.
+ // Inspect encryption from a separate process that has no database connection.
+ assert.equal(child(`const fs=require('node:fs'),path=require('node:path');const secrets=JSON.parse(fs.readFileSync(0,'utf8'));const folder=process.env.SESSION_DATA_DIR;const disk=fs.readdirSync(folder).filter(n=>n.startsWith('sessions.sqlite')).map(n=>fs.readFileSync(path.join(folder,n))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0));console.log(secrets.every(s=>!disk.includes(Buffer.from(s))));`,[payload.user,payload.pass,id]),'true');
  assert.equal(child("const a=require('./api/auth');const id=JSON.parse(require('fs').readFileSync(0,'utf8')).id;a.validarTokenLogin(id).then(v=>console.log(v.user==='sensitive-test-user'));",{id}),'true');
  await auth.revogarTokenLogin(id);assert.equal(await auth.validarTokenLogin(id),null);
  assert.ok(await auth.validarTokenLogin(other));assert.equal(await auth.revogarTokenLogin(id),true);
