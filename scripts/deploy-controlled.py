@@ -92,7 +92,8 @@ def main():
     if json.loads((old_dir/'package.json').read_text()).get('name')!='sigaa-api-backend': raise RuntimeError('Unexpected backend application')
     old_current=current.resolve() if current.is_symlink() else None
     old_proxy=nginx_path.read_text();old_unit=unit_path.read_text() if unit_path.exists() else None
-    old_service_pid=run(['systemctl','show',service,'--property=MainPID','--value'])
+    status=subprocess.run(['systemctl','show',service,'--property=MainPID','--value'],capture_output=True,text=True)
+    old_service_pid=status.stdout.strip() or '0'
     if old_service_pid not in ['', '0', str(old_pid)]: raise RuntimeError('Service belongs to another process')
     release=home/'sigaa-releases'/time.strftime('%Y%m%d-%H%M%S',time.gmtime());release.mkdir(parents=True,exist_ok=False)
     backend,frontend=release/'backend',release/'Sigaa-API-webapp'
@@ -127,7 +128,7 @@ def main():
     try:
         log('Checking candidate while current API stays online');probe(port,sha)
         (release/'deployment.json').write_text(json.dumps({'backend':sha,'frontend':front_sha,'node':version})+'\n')
-        configure_proxy(proxy_config(old_proxy,port));switched=True
+        switched=True;configure_proxy(proxy_config(old_proxy,port))
         log('Proxy switched; draining previous backend')
         deadline=time.monotonic()+150
         while True:

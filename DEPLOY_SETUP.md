@@ -1,74 +1,37 @@
-# Deploy Automático via Git
+# Deploy controlado
 
-## Setup (Já feito ✅)
+Use Node 24 LTS instalado e verificado em `~/.local/lib/node-v24.*-linux-x64`.
+O deploy preserva o runtime anterior, os segredos e os dados.
 
-A VM está configurada com:
-- Repo git: `~/sigaa-api-backend-git` (clone do GitHub)
-- Script de deploy: `~/deploy.sh`
-- Node.js e npm em `/usr/bin/`
-
-## Fluxo de Deploy
-
-### Opção 1: Fazer commit → push → deploy na VM (RECOMENDADO)
-
-```powershell
-# 1. No seu local, faça alterações e commit
-cd C:\Users\Henrique\Documents\GitHub\SIGAA_APP\sigaa-api-backend
-git add api/scraper.js
-git commit -m "fix: descrição das mudanças"
-git push
-
-# 2. Na VM, execute o deploy
-ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 ~/deploy.sh
-```
-
-Isso vai:
-- Parar o servidor
-- Git pull (pega suas mudanças)
-- npm install (se necessário)
-- Reiniciar o servidor com NODE_ENV=production
-
-### Opção 2: Deploy direto do PowerShell (one-liner)
+Depois de publicar os commits dos dois reposit?rios:
 
 ```powershell
 ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "~/deploy.sh"
 ```
 
-## Verificar Status
+Para fixar os commits, passe os hashes completos do backend e do frontend:
 
-```powershell
-# Ver se servidor está rodando
-ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "ps aux | grep 'node server' | grep -v grep"
-
-# Ver logs em tempo real
-ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "tail -f ~/sigaa_server.log"
+```sh
+~/deploy.sh BACKEND_SHA FRONTEND_SHA
 ```
 
-## Volumes no Cloud
+O script clona uma release limpa, instala o lockfile, executa testes e auditoria,
+inicia uma copia candidata em porta local separada e verifica saude e logout.
+Depois troca o Nginx, aguarda consultas antigas e inicia o servico permanente.
+Se a validacao falhar, restaura a configuracao e o backend anterior.
 
-Depois de fazer push para GitHub, você pode fazer deploy na VM em segundos com um único comando.
+- Servico: `sigaa-backend.service`, com reinicio automatico.
+- Release ativa: `~/sigaa-current/backend`.
+- Segredos: `~/sigaa-shared/.env`, permissao 600, fora do Git.
+- Cache e dados: `~/sigaa-shared/`, compartilhados entre releases.
+- Frontend na VPS: `~/sigaa-current/Sigaa-API-webapp`.
+- Frontend publico adicional: GitHub Pages do repositorio `Sigaa-API-webapp`.
 
-## Estrutura
-
-```
-Local (seu computador):
-  C:\...\SIGAA_APP\sigaa-api-backend\
-  ├── api/scraper.js (você edita aqui)
-  ├── server.js
-  ├── package.json
-  └── ... (no repositório GitHub)
-
-NA VM (163.176.42.177):
-  ~/sigaa-api-backend-git/  ← clone git
-  ├── api/scraper.js
-  ├── server.js (rodando via nohup)
-  └── node_modules/
-
-  ~/deploy.sh  ← script de deploy automático
-  ~/sigaa_server.log  ← logs do servidor
+```sh
+sudo systemctl status sigaa-backend
+journalctl -u sigaa-backend -n 30
+curl https://ak4ai-sigaa.duckdns.org/api/health
 ```
 
-## Próximos Passos
-
-1. **Abrir porta 8080** na Oracle Cloud Security List (ainda bloqueada externamente)
-2. **Testar deploy**: Faça uma pequena mudança, push, e execute `~/deploy.sh`
+Publique o backend e valide a API antes de atualizar a branch `main` da interface
+no GitHub Pages. Nunca copie `.env` ou chaves SSH para commits ou artefatos publicos.
