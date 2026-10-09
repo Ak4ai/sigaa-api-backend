@@ -33,6 +33,7 @@ app.use((req, res, next) => { browserSession.applyCors(req, res); next(); });
 
 // Middleware para parsear JSON
 app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+app.use(require('./lib/security-headers'));
 app.use('/api', (req, res, next) => {
     req.apiRateLimited = true;
     res.setHeader('Cache-Control', 'no-store');
@@ -120,10 +121,6 @@ app.get('/', (req, res) => {
         return res.status(404).send('index.html não encontrado em: ' + indexPath);
     }
     let html = fs.readFileSync(indexPath, 'utf8');
-    html = html.replace(
-        '</head>',
-        '  <script>window.API_BASE_URL = window.location.origin;</script>\n</head>'
-    );
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
 });

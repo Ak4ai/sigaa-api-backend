@@ -205,7 +205,8 @@ test('actual Express routes revoke tokens and reject replay without contacting S
                     const page = await fetch(base + '/');
                     if (page.status === 200) {
                         const html = await page.text();
-                        assert.ok(html.includes('window.API_BASE_URL = window.location.origin;'));
+                        assert.ok(!html.includes('<script>'));
+                        assert.ok(page.headers.get('Content-Security-Policy').includes("script-src 'self'"));
                     }
                     server.closeAllConnections();
                     server.close(() => setTimeout(() => process.exit(0), 50));
