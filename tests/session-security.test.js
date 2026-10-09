@@ -181,14 +181,24 @@ test('actual Express routes revoke tokens and reject replay without contacting S
             server.once('listening', async () => {
                 try {
                     const base = 'http://127.0.0.1:' + server.address().port;
+                    const bootstrap = await fetch(base + '/api/session');
+                    const csrf = (await bootstrap.json()).csrf;
+                    const cookie = bootstrap.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
                     const post = (endpoint, body) => fetch(base + endpoint, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, Cookie: cookie },
                         body: JSON.stringify(body)
                     });
                     assert.equal((await post('/api/login', { user: {}, pass: 'x' })).status, 400);
                     const login = await post('/api/login', {user:'test-user',pass:'test-password'});
                     assert.equal(login.status, 200);
-                    const { token } = await login.json();
+                    const session = await login.json();
+                    assert.equal(session.token, undefined);
+                    const activeCookies = login.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+                    const mismatch = await fetch(base + '/api/scraper', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: activeCookies, 'X-CSRF-Token': session.csrf, 'X-Profile-User': 'different-account' }, body: '{}'
+                    });
+                    assert.equal(mismatch.status, 409);
+                    const token = login.headers.getSetCookie().find(c => c.startsWith('sigaa_session=')).split(';')[0].slice('sigaa_session='.length);
                     assert.equal((await post('/api/logout', {token})).status, 200);
                     assert.equal((await post('/api/scraper', {token})).status, 401);
                     assert.equal((await post('/api/logout', {token})).status, 200);

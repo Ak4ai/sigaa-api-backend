@@ -28,16 +28,8 @@ if (!fs.existsSync(FRONTEND_DIR)) {
     FRONTEND_DIR = path.resolve(__dirname, '../Sigaa-API-webapp');
 }
 
-// CORS global — deve vir ANTES de qualquer outro middleware
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    next();
-});
+const browserSession = require('./lib/browser-session');
+app.use((req, res, next) => { browserSession.applyCors(req, res); next(); });
 
 // Middleware para parsear JSON
 app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
@@ -50,6 +42,8 @@ app.use('/api', createRateLimiter({ limit: limits.api, windowMs: 60000 }));
 app.use('/api/login', createRateLimiter({ limit: limits.login, windowMs: 600000 }));
 app.use('/api/scraper', createRateLimiter({ limit: limits.scrape, windowMs: 600000 }));
 app.use(express.json({ limit: '16kb' }));
+app.use('/api', browserSession.middleware);
+app.get('/api/session', browserSession.sessionHandler);
 
 app.get('/api/health', (req, res) => res.json({
     status: 'ok', release: process.env.RELEASE_VERSION || 'development'
@@ -92,6 +86,9 @@ app.all('/api/scraper', async (req, res) => {
             budget.signal.throwIfAborted();
             if (!payload || !validScrapeBody({user: payload.user, pass: payload.pass})) {
                 return res.status(401).json({ error: 'Token inválido ou expirado.' });
+            }
+            if (req.headers['x-profile-user'] && req.headers['x-profile-user'] !== payload.user) {
+                return res.status(409).json({ error: 'A conta ativa mudou em outra aba. Entre novamente na conta selecionada.' });
             }
             user = payload.user;
             pass = payload.pass;

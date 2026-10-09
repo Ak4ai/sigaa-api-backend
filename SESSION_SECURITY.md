@@ -1,13 +1,31 @@
-# Logout e transporte dos tokens
+# Sessão em cookie HttpOnly
 
-O frontend envia credenciais e tokens apenas por HTTPS. HTTP é permitido somente
-quando tanto a página quanto a API estão em localhost/loopback. Falhas de HTTPS e
-redirecionamentos não provocam reenvio por HTTP.
+O login não retorna JWT ao JavaScript. A sessão fica em cookie
+`__Host-sigaa_session`, com `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` e sem
+`Domain`. A opção manter conectado define Max-Age de sete dias; caso contrário,
+o cookie dura a sessão do navegador. HTTP sem Secure é permitido somente no
+desenvolvimento com host localhost/127.0.0.1. Não há fallback de HTTPS para HTTP.
 
-`POST /api/logout`, com `{ "token": "..." }`, revoga a sessão até sua expiração.
-Novos JWTs têm `jti` único. Tokens antigos sem `jti` são identificados por um hash
-SHA-256 do token canonizado. O armazenamento não contém usuário, senha ou JWT.
-Logout repetido e logout de token expirado são seguros e retornam sucesso.
+`GET /api/session` confirma o cookie e retorna apenas usuário, expiração e uma
+prova de CSRF. O frontend guarda somente metadados, nunca o JWT. A prova de CSRF
+fica em memória; é um HMAC de um nonce aleatório em outro cookie HttpOnly. Login
+e qualquer POST com cookie exigem `X-CSRF-Token`. Origens não autorizadas e
+pedidos identificados pelo navegador como cross-site são recusados. CORS permite
+credenciais somente para a origem da aplicação e a origem local do backend.
+
+`POST /api/logout`, com `{}`, revoga o JWT recebido pelo cookie antes de apagá-lo.
+Falhas de armazenamento mantêm a sessão para nova tentativa. Trocar de conta
+revoga a sessão anterior. JWTs anteriores à versão 2 são recusados mesmo que
+ainda não tenham expirado: a atualização exige novo login.
+
+A interface publicada no GitHub Pages encaminha para
+`https://ak4ai-sigaa.duckdns.org/`, que hospeda a interface e a API juntas.
+Isso evita depender de cookies de terceiros bloqueados por navegadores.
+O endereço antigo apaga seus tokens locais antes de encaminhar. Preferências e
+perfis salvos são específicos de cada origem e não são transferidos ao servidor.
+
+As credenciais continuam criptografadas dentro do JWT no cookie. Migrar para um
+identificador de sessão com credenciais somente no servidor é uma etapa separada.
 
 ## VPS e desenvolvimento local
 

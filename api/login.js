@@ -1,9 +1,10 @@
-const { gerarTokenLogin } = require('./auth');
+const { gerarTokenLogin, revogarTokenLogin } = require('./auth');
+const { issueSession, cookieToken } = require('../lib/browser-session');
 const { withRateProtection, limits } = require('../lib/request-protection');
 
 async function handler(req, res) {
     // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -17,10 +18,14 @@ async function handler(req, res) {
     if (typeof user !== 'string' || typeof pass !== 'string' || !user || !pass || user.length > 128 || pass.length > 1024) {
         return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
     }
-    // Aqui você pode validar o login no SIGAA, se quiser.
-    // Se sucesso:
+    const previous = cookieToken(req);
+    if (previous) {
+        try { await revogarTokenLogin(previous); }
+        catch { return res.status(503).json({ error: 'Não foi possível substituir a sessão. Tente novamente.' }); }
+    }
     const token = gerarTokenLogin({ user, pass });
-    return res.status(200).json({ token });
+    const csrf = issueSession(req, res, token, req.body.remember === true);
+    return res.status(200).json({ cookie: true, loggedIn: true, user, expiresAt: require('jsonwebtoken').decode(token).exp * 1000, csrf });
 };
 
 module.exports = withRateProtection(handler, limits.login);

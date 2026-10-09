@@ -27,7 +27,7 @@ function decrypt(text, key) {
 }
 
 function gerarTokenLogin(payload, expiresIn = '7d') {
-    payload = { ...payload, jti: crypto.randomUUID() };
+    payload = { ...payload, jti: crypto.randomUUID(), sessionVersion: 2 };
     // Criptografa usuário e senha antes de salvar no payload
     if (payload.user) {
         payload.user = encrypt(payload.user, ENC_SECRET_USER);
@@ -50,7 +50,7 @@ function verificarAssinatura(token, ignoreExpiration = false) {
 
 async function validarTokenLogin(token) {
     const payload = verificarAssinatura(token);
-    if (!payload || await revocations.isRevoked(token, payload)) return null;
+    if (!payload || payload.sessionVersion !== 2 || await revocations.isRevoked(token, payload)) return null;
     try {
         // Descriptografa usuário e senha ao ler o payload
         if (payload.user) {

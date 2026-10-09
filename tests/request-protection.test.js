@@ -119,7 +119,10 @@ test('HTTP routes enforce payload size, auth rate, queue admission and runtime c
             server.once('listening',async()=>{
                 try{
                     const base='http://127.0.0.1:'+server.address().port;
-                    const post=(endpoint,body,signal)=>fetch(base+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
+                    const bootstrap=await fetch(base+'/api/session');
+                    const csrf=(await bootstrap.json()).csrf;
+                    const cookie=bootstrap.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+                    const post=(endpoint,body,signal)=>fetch(base+endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,Cookie:cookie},body:JSON.stringify(body),signal});
                     assert.equal((await post('/api/login',{user:'a',pass:'b'})).status,200);
                     const rate=await post('/api/login',{user:'a',pass:'b'});
                     assert.equal(rate.status,429);assert.ok(rate.headers.get('Retry-After'));

@@ -3,7 +3,8 @@ const { validarTokenLogin } = require('./auth');
 const { createRateLimiter } = require('../lib/request-protection');
 const writeLimit = createRateLimiter({ limit: 20, windowMs: 60000 });
 module.exports = async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (!require('../lib/browser-session').prepareBrowserRequest(req, res)) return;
+
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Cache-Control', 'no-store');
@@ -16,7 +17,11 @@ module.exports = async function handler(req, res) {
     }
     try {
         const token = /^Bearer ([^ ]+)$/i.exec(req.headers.authorization || '')?.[1];
-        if (token && !await validarTokenLogin(token)) return res.status(401).json({ error: 'Sessão expirada. Entre novamente.' });
+        const payload = token ? await validarTokenLogin(token) : null;
+        if (token && !payload) return res.status(401).json({ error: 'Sessão expirada. Entre novamente.' });
+        if (payload && req.headers['x-profile-user'] && req.headers['x-profile-user'] !== payload.user) {
+            return res.status(409).json({ error: 'A conta ativa mudou em outra aba. Entre novamente na conta selecionada.' });
+        }
         const access = await exams.getAccess(token);
         if (req.method === 'POST') {
             if (!token) return res.status(401).json({ error: 'Entre na sua conta para cadastrar provas.' });

@@ -2,6 +2,7 @@
 """Test candidate, switch proxy, preserve secrets/data and roll back on failure."""
 from pathlib import Path
 import json, os, re, signal, shutil, socket, subprocess, sys, tempfile, time, urllib.request, urllib.error
+import http.cookiejar
 
 home = Path.home()
 shared, current = home/'sigaa-shared', home/'sigaa-current'
@@ -74,9 +75,21 @@ def probe(port,sha):
         except Exception: pass
         time.sleep(.25)
     else: raise RuntimeError('Health check failed')
-    token=request(port,'/api/login',{'user':'deployment-smoke','pass':'not-a-real-password'})['token']
-    if not request(port,'/api/logout',{'token':token}).get('success'): raise RuntimeError('Logout failed')
-    try: request(port,'/api/scraper',{'token':token})
+    jar=http.cookiejar.CookieJar()
+    opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    csrf=None
+    def browser_request(endpoint,data=None):
+        headers={'Content-Type':'application/json'}
+        if csrf: headers['X-CSRF-Token']=csrf
+        req=urllib.request.Request(f'http://127.0.0.1:{port}{endpoint}',data=json.dumps(data).encode() if data is not None else None,headers=headers)
+        with opener.open(req,timeout=5) as response:return json.load(response)
+    csrf=browser_request('/api/session')['csrf']
+    session=browser_request('/api/login',{'user':'deployment-smoke','pass':'not-a-real-password'})
+    if 'token' in session or not session.get('cookie'):raise RuntimeError('Unsafe login response')
+    csrf=session['csrf']
+    token=next(cookie.value for cookie in jar if cookie.name=='sigaa_session')
+    if not browser_request('/api/logout',{}).get('success'): raise RuntimeError('Logout failed')
+    try: browser_request('/api/scraper',{'token':token})
     except urllib.error.HTTPError as error:
         if error.code!=401: raise
     else: raise RuntimeError('Revoked token accepted')

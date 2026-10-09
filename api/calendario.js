@@ -8,7 +8,7 @@ const CACHE_DURATION = 1 * 60 * 60 * 1000; // 1 hora de cache
 
 module.exports = async function handler(req, res) {
     // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
