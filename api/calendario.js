@@ -1,6 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const https = require('https');
+const { createCefetHttpsAgent } = require('../lib/cefet-tls');
 
 // Cache em memória para evitar requisições excessivas à página externa (separado por curso)
 const cache = {};
@@ -34,9 +34,7 @@ module.exports = async function handler(req, res) {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
-            httpsAgent: new https.Agent({
-                rejectUnauthorized: false
-            }),
+            httpsAgent: createCefetHttpsAgent(),
             timeout: 5000 // timeout de 5 segundos
         });
 

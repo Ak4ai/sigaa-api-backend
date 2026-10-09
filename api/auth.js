@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const revocations = require('../lib/token-revocations');
 
 const SECRET = process.env.SECRET;
 const ENC_SECRET = process.env.ENC_SECRET; // 32 caracteres para AES-256 (senha)
@@ -26,6 +27,7 @@ function decrypt(text, key) {
 }
 
 function gerarTokenLogin(payload, expiresIn = '7d') {
+    payload = { ...payload, jti: crypto.randomUUID() };
     // Criptografa usuário e senha antes de salvar no payload
     if (payload.user) {
         payload.user = encrypt(payload.user, ENC_SECRET_USER);
@@ -36,9 +38,20 @@ function gerarTokenLogin(payload, expiresIn = '7d') {
     return jwt.sign(payload, SECRET, { expiresIn });
 }
 
-function validarTokenLogin(token) {
+function verificarAssinatura(token, ignoreExpiration = false) {
     try {
-        const payload = jwt.verify(token, SECRET);
+        const payload = jwt.verify(token, SECRET, { algorithms: ['HS256'], ignoreExpiration });
+        if (!payload || typeof payload !== 'object' || !Number.isSafeInteger(payload.exp)) return null;
+        return payload;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function validarTokenLogin(token) {
+    const payload = verificarAssinatura(token);
+    if (!payload || await revocations.isRevoked(token, payload)) return null;
+    try {
         // Descriptografa usuário e senha ao ler o payload
         if (payload.user) {
             payload.user = decrypt(payload.user, ENC_SECRET_USER);
@@ -52,4 +65,11 @@ function validarTokenLogin(token) {
     }
 }
 
-module.exports = { gerarTokenLogin, validarTokenLogin };
+async function revogarTokenLogin(token) {
+    const payload = verificarAssinatura(token, true);
+    if (!payload) return false;
+    if (payload.exp > Math.floor(Date.now() / 1000)) await revocations.revoke(token, payload);
+    return true;
+}
+
+module.exports = { gerarTokenLogin, validarTokenLogin, revogarTokenLogin };

@@ -15,9 +15,10 @@ const axios = require('axios');
 const { CookieJar } = require('tough-cookie');
 const { load } = require('cheerio');
 const { URLSearchParams } = require('url');
-const https = require('https');
+const { createCefetHttpsAgent } = require('../lib/cefet-tls');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { validarTokenLogin } = require('./auth');
+const { withScrapeProtection } = require('../lib/request-protection');
 const { setProgress } = require('./progress');
 
 const BASE_URL = 'https://sig.cefetmg.br';
@@ -87,7 +88,10 @@ function decodeHtmlEntities(str) {
     }
     // Se não está em cache, decodificar e armazenar
     const decoded = load(`<x>${str}</x>`)('x').text();
-    entityCache.set(str, decoded);
+    if (str.length <= 4096) {
+        if (entityCache.size >= 2000) entityCache.delete(entityCache.keys().next().value);
+        entityCache.set(str, decoded);
+    }
     return decoded;
 }
 
@@ -381,7 +385,7 @@ function parseNotas(html) {
 
 // ── Handler principal ───────────────────────────────────────────────────────
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -391,7 +395,12 @@ module.exports = async function handler(req, res) {
     // Resolve credenciais (token JWT ou user/pass direto)
     let user, pass;
     if (req.body.token) {
-        const payload = validarTokenLogin(req.body.token);
+        let payload;
+        try {
+            payload = await validarTokenLogin(req.body.token);
+        } catch (error) {
+            return res.status(503).json({ error: 'Não foi possível verificar a sessão. Tente novamente.' });
+        }
         if (!payload) return res.status(401).json({ error: 'Token inválido ou expirado.' });
         user = payload.user;
         pass = payload.pass;
@@ -417,7 +426,10 @@ module.exports = async function handler(req, res) {
         validateStatus: () => true,
         decompress: true,
         timeout: 30000,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        signal: req.scrapeSignal,
+        maxContentLength: 2 * 1024 * 1024,
+        maxBodyLength: 2 * 1024 * 1024,
+        httpsAgent: createCefetHttpsAgent(),
     });
 
     // Gerencia cookies manualmente via interceptors
@@ -557,6 +569,7 @@ module.exports = async function handler(req, res) {
         const avisosPorDisciplina = [];
 
         for (let i = 0; i < turmas.length; i++) {
+            req.scrapeSignal?.throwIfAborted();
             const turma = turmas[i];
             const progressPercent = Math.min(20 + (i + 1) * 10, 90); // 30%, 40%, ..., 90%
             setProgress(clientId, progressPercent, `⏳ Processando ${turma.nome}...`);
@@ -671,6 +684,7 @@ module.exports = async function handler(req, res) {
         const atividadesPortal = isGraduacao ? parseAvaliacaoPortal(portalHtml) : [];
         console.log(`[scraper] 📋 Atividades extraídas do portal: ${atividadesPortal.length} itens.`);
 
+        req.scrapeSignal?.throwIfAborted();
         return res.status(200).json({
             dadosInstitucionais,
             horariosDetalhados,
@@ -680,6 +694,7 @@ module.exports = async function handler(req, res) {
         });
 
     } catch (error) {
+        if (req.scrapeSignal?.aborted) return;
         const msg = error.message || 'Erro interno';
 
         if (
@@ -698,6 +713,8 @@ module.exports = async function handler(req, res) {
         }
 
         console.error('[scraper] Erro:', msg);
-        return res.status(500).json({ error: msg });
+        return res.status(500).json({ error: 'Erro ao consultar o SIGAA.' });
     }
 };
+
+module.exports = withScrapeProtection(handler);

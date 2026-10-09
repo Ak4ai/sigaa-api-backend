@@ -3,8 +3,13 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
+const crypto = require('crypto');
+const { validarTokenLogin } = require('./api/auth');
+const { ScrapeQueue } = require('./lib/scrape-queue');
+const { limits, createRateLimiter, validScrapeBody, attachRequestBudget, scrapeIdentity } = require('./lib/request-protection');
 const fs = require('fs');
 const loginHandler = require('./api/login');
+const logoutHandler = require('./api/logout');
 const scraperHandler = require('./api/scraper');
 const calendarioHandler = require('./api/calendario');
 const calendarioEventosHandler = require('./api/calendario-eventos');
@@ -35,71 +40,29 @@ app.use((req, res, next) => {
 });
 
 // Middleware para parsear JSON
-app.use(express.json());
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+app.use('/api', (req, res, next) => {
+    req.apiRateLimited = true;
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+});
+app.use('/api', createRateLimiter({ limit: limits.api, windowMs: 60000 }));
+app.use('/api/login', createRateLimiter({ limit: limits.login, windowMs: 600000 }));
+app.use('/api/scraper', createRateLimiter({ limit: limits.scrape, windowMs: 600000 }));
+app.use(express.json({ limit: '16kb' }));
+
+app.get('/api/health', (req, res) => res.json({
+    status: 'ok', release: process.env.RELEASE_VERSION || 'development'
+}));
 
 // ── Sistema de fila para scraping ────────────────────────────────────────
-const scraperQueue = [];       // fila: [{ id, resolve, reject }]
-let isScraperBusy = false;     // mutex: alguém está fazendo scraping?
-let currentJobId = null;       // ID do job sendo processado agora
-let currentClientId = null;    // clientId do job sendo processado agora
-let queueIdCounter = 0;        // ID incremental
-const scrapeTimesMs = [];       // últimos N tempos de scraping para calcular média
-const MAX_TIMES_HISTORY = 20;
+const scraperQueue = new ScrapeQueue(limits.queue);
+let queueIdCounter = 0;
 
-function getAvgScrapeTimeMs() {
-    if (scrapeTimesMs.length === 0) return 60000; // padrão: 60s
-    return Math.round(scrapeTimesMs.reduce((a, b) => a + b, 0) / scrapeTimesMs.length);
-}
-
-async function processQueue() {
-    if (isScraperBusy || scraperQueue.length === 0) return;
-    isScraperBusy = true;
-    const job = scraperQueue.shift();
-    currentJobId = job.id;
-    currentClientId = job.clientId || null;
-    try {
-        const startMs = Date.now();
-        await job.run();
-        const elapsed = Date.now() - startMs;
-        scrapeTimesMs.push(elapsed);
-        if (scrapeTimesMs.length > MAX_TIMES_HISTORY) scrapeTimesMs.shift();
-    } catch (err) {
-        console.error('Erro no job da fila:', err);
-    } finally {
-        currentJobId = null;
-        currentClientId = null;
-        isScraperBusy = false;
-        processQueue(); // processa próximo
-    }
-}
-
-// Endpoint para o frontend consultar posição na fila
 app.get('/api/queue-status', (req, res) => {
-    const clientId = req.query.clientId || '';
-    let position = -1; // -1 = não encontrado / entrando na fila
-
-    if (clientId) {
-        // Verifica se está sendo processado agora
-        if (isScraperBusy && currentClientId === clientId) {
-            position = 1; // está sendo processado
-        } else {
-            // Procura na fila de espera
-            const idx = scraperQueue.findIndex(j => j.clientId === clientId);
-            if (idx !== -1) {
-                position = idx + 1 + (isScraperBusy ? 1 : 0); // +1 por quem está processando
-            }
-            // Se não achou, position = -1 (ainda não chegou ou já terminou)
-        }
-    }
-
-    console.log(`[FILA-STATUS] clientId=${clientId}, position=${position}, queue=${scraperQueue.length}, busy=${isScraperBusy}, currentClientId=${currentClientId}`);
-
-    res.json({
-        position,
-        queueLength: scraperQueue.length,
-        processing: isScraperBusy,
-        avgTimeMs: getAvgScrapeTimeMs()
-    });
+    const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : '';
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(scraperQueue.status(clientId));
 });
 
 // ── Novo endpoint: progresso em tempo real ────────────────────────────────
@@ -111,6 +74,7 @@ app.get('/api/scraper-progress', (req, res) => {
 
 // Rota de login
 app.all('/api/login', (req, res) => loginHandler(req, res));
+app.all('/api/logout', (req, res) => logoutHandler(req, res));
 
 // Rota de calendário dinâmico
 app.all('/api/calendario', (req, res) => calendarioHandler(req, res));
@@ -118,40 +82,41 @@ app.all('/api/calendario/eventos', (req, res) => calendarioEventosHandler(req, r
 
 // Rota de scraper — com fila
 app.all('/api/scraper', async (req, res) => {
-    if (req.method === 'OPTIONS') return res.status(200).end();
-
-    const queueId = ++queueIdCounter;
-    const clientId = req.body.clientId || `auto-${queueId}`;
-    const position = scraperQueue.length + (isScraperBusy ? 1 : 0);
-
-    res.setHeader('X-Queue-Id', String(queueId));
-
-    console.log(`[FILA] Job #${queueId} (clientId: ${clientId}) enfileirado (posição ${position + 1}, fila: ${scraperQueue.length + 1})`);
-
-    // Enfileira e aguarda sua vez
-    await new Promise((resolve, reject) => {
-        scraperQueue.push({
-            id: queueId,
-            clientId: clientId,
-            run: async () => {
-                try {
-                    console.log(`[FILA] Job #${queueId} iniciando scraping...`);
-                    await scraperHandler(req, res);
-                    resolve();
-                } catch (error) {
-                    console.error(`[FILA] Erro no job #${queueId}:`, error);
-                    if (!res.headersSent) {
-                        res.status(500).json({ error: 'Erro interno do servidor.' });
-                    }
-                    resolve(); // resolve anyway para não travar a fila
-                }
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Use POST.' });
+    if (!validScrapeBody(req.body)) return res.status(400).json({ error: 'Parâmetros de consulta inválidos.' });
+    const budget = attachRequestBudget(req, res);
+    try {
+        let user = req.body.user, pass = req.body.pass;
+        if (req.body.token) {
+            const payload = await validarTokenLogin(req.body.token);
+            budget.signal.throwIfAborted();
+            if (!payload || !validScrapeBody({user: payload.user, pass: payload.pass})) {
+                return res.status(401).json({ error: 'Token inválido ou expirado.' });
             }
+            user = payload.user;
+            pass = payload.pass;
+        }
+        budget.signal.throwIfAborted();
+        const clientId = req.body.clientId || crypto.randomUUID();
+        req.body.clientId = clientId;
+        res.setHeader('X-Queue-Id', String(++queueIdCounter));
+        res.setHeader('Cache-Control', 'no-store');
+        await scraperQueue.enqueue({
+            identity: scrapeIdentity(user, pass), clientId, signal: budget.signal,
+            run: async () => { budget.start(); await scraperHandler(req, res); }
         });
-        processQueue(); // tenta processar se não há ninguém rodando
-    });
+    } catch (error) {
+        if (budget.signal.aborted || res.headersSent || res.destroyed) return;
+        const status = error.status || 503;
+        if (status === 429) res.setHeader('Retry-After', '60');
+        const message = error.status ? error.message : 'Não foi possível realizar a consulta. Tente novamente.';
+        res.status(status).json({ error: message });
+    } finally {
+        budget.cleanup();
+    }
 });
 
-// Serve index.html injetando a URL local da API
+// Serve index.html usando a mesma origem da página para a API
 app.get('/', (req, res) => {
     const indexPath = path.join(FRONTEND_DIR, 'index.html');
     if (!fs.existsSync(indexPath)) {
@@ -160,7 +125,7 @@ app.get('/', (req, res) => {
     let html = fs.readFileSync(indexPath, 'utf8');
     html = html.replace(
         '</head>',
-        `  <script>window.API_BASE_URL = 'http://localhost:${PORT}';</script>\n</head>`
+        '  <script>window.API_BASE_URL = window.location.origin;</script>\n</head>'
     );
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
@@ -171,11 +136,20 @@ app.use(express.static(FRONTEND_DIR));
 
 // Agendador diário para verificar e atualizar calendários (24 horas)
 const CRON_INTERVAL_MS = 24 * 60 * 60 * 1000;
-setInterval(atualizarCalendariosBackground, CRON_INTERVAL_MS);
+if (process.env.DISABLE_CALENDAR_CRON !== '1') {
+    setInterval(atualizarCalendariosBackground, CRON_INTERVAL_MS);
 // Executa uma checagem inicial após 10 segundos ao ligar o servidor
-setTimeout(atualizarCalendariosBackground, 10000);
+    setTimeout(atualizarCalendariosBackground, 10000);
+}
 
-app.listen(PORT, () => {
+app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    if (error.type === 'entity.too.large') return res.status(413).json({ error: 'Requisição muito grande.' });
+    if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON inválido.' });
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+});
+
+const server = app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     console.log(`\n✅ Servidor rodando em http://localhost:${PORT}`);
     console.log(`   Frontend:    http://localhost:${PORT}/`);
     console.log(`   API Login:   POST http://localhost:${PORT}/api/login`);
@@ -183,3 +157,8 @@ app.listen(PORT, () => {
     console.log(`\n   NODE_ENV: ${process.env.NODE_ENV}`);
     console.log('   Chrome: C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\n');
 });
+
+server.headersTimeout = 10000;
+server.requestTimeout = 15000;
+server.keepAliveTimeout = 5000;
+server.maxHeadersCount = 50;

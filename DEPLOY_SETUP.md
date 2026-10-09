@@ -19,7 +19,7 @@ git commit -m "fix: descrição das mudanças"
 git push
 
 # 2. Na VM, execute o deploy
-ssh -i "$HOME\.ssh\oracle_key" ubuntu@163.176.42.177 ~/deploy.sh
+ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 ~/deploy.sh
 ```
 
 Isso vai:
@@ -31,17 +31,17 @@ Isso vai:
 ### Opção 2: Deploy direto do PowerShell (one-liner)
 
 ```powershell
-ssh -i "$HOME\.ssh\oracle_key" ubuntu@163.176.42.177 "~/deploy.sh"
+ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "~/deploy.sh"
 ```
 
 ## Verificar Status
 
 ```powershell
 # Ver se servidor está rodando
-ssh -i "$HOME\.ssh\oracle_key" ubuntu@163.176.42.177 "ps aux | grep 'node server' | grep -v grep"
+ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "ps aux | grep 'node server' | grep -v grep"
 
 # Ver logs em tempo real
-ssh -i "$HOME\.ssh\oracle_key" ubuntu@163.176.42.177 "tail -f ~/sigaa_server.log"
+ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "tail -f ~/sigaa_server.log"
 ```
 
 ## Volumes no Cloud

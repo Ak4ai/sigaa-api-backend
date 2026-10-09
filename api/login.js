@@ -1,6 +1,7 @@
 const { gerarTokenLogin } = require('./auth');
+const { withRateProtection, limits } = require('../lib/request-protection');
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -9,9 +10,11 @@ module.exports = async function handler(req, res) {
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
 
-    const { user, pass } = req.body;
-    if (!user || !pass) {
+    const { user, pass } = req.body || {};
+    if (typeof user !== 'string' || typeof pass !== 'string' || !user || !pass || user.length > 128 || pass.length > 1024) {
         return res.status(400).json({ error: 'Usuário e senha obrigatórios.' });
     }
     // Aqui você pode validar o login no SIGAA, se quiser.
@@ -19,3 +22,5 @@ module.exports = async function handler(req, res) {
     const token = gerarTokenLogin({ user, pass });
     return res.status(200).json({ token });
 };
+
+module.exports = withRateProtection(handler, limits.login);

@@ -15,9 +15,10 @@ const axios = require('axios');
 const { CookieJar } = require('tough-cookie');
 const { load } = require('cheerio');
 const { URLSearchParams } = require('url');
-const https = require('https');
+const { createCefetHttpsAgent } = require('../lib/cefet-tls');
 const { interpretSchedule, gerarTabelaSimplificada } = require('./scheduleParser');
 const { validarTokenLogin } = require('./auth');
+const { withScrapeProtection } = require('../lib/request-protection');
 
 const BASE_URL = 'https://sig.cefetmg.br';
 
@@ -201,7 +202,7 @@ function parseNotas(html) {
 
 // ── Handler principal ───────────────────────────────────────────────────────
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -211,7 +212,12 @@ module.exports = async function handler(req, res) {
     // Resolve credenciais (token JWT ou user/pass direto)
     let user, pass;
     if (req.body.token) {
-        const payload = validarTokenLogin(req.body.token);
+        let payload;
+        try {
+            payload = await validarTokenLogin(req.body.token);
+        } catch (error) {
+            return res.status(503).json({ error: 'Não foi possível verificar a sessão. Tente novamente.' });
+        }
         if (!payload) return res.status(401).json({ error: 'Token inválido ou expirado.' });
         user = payload.user;
         pass = payload.pass;
@@ -228,7 +234,10 @@ module.exports = async function handler(req, res) {
         validateStatus: () => true,
         decompress: true,
         timeout: 30000,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        signal: req.scrapeSignal,
+        maxContentLength: 2 * 1024 * 1024,
+        maxBodyLength: 2 * 1024 * 1024,
+        httpsAgent: createCefetHttpsAgent(),
     });
 
     // Gerencia cookies manualmente via interceptors
@@ -286,6 +295,7 @@ module.exports = async function handler(req, res) {
         const avisosPorDisciplina = [];
 
         for (const turma of turmas) {
+            req.scrapeSignal?.throwIfAborted();
             console.log(`[scraper] Turma: ${turma.nome} (${turma.idTurma})`);
 
             // 3a: Entra no AVA
@@ -381,6 +391,7 @@ module.exports = async function handler(req, res) {
         }
 
         console.log('[scraper] Concluído');
+        req.scrapeSignal?.throwIfAborted();
         return res.status(200).json({
             dadosInstitucionais,
             horariosDetalhados,
@@ -389,6 +400,7 @@ module.exports = async function handler(req, res) {
         });
 
     } catch (error) {
+        if (req.scrapeSignal?.aborted) return;
         const msg = error.message || 'Erro interno';
 
         if (
@@ -407,6 +419,8 @@ module.exports = async function handler(req, res) {
         }
 
         console.error('[scraper] Erro:', msg);
-        return res.status(500).json({ error: msg });
+        return res.status(500).json({ error: 'Erro ao consultar o SIGAA.' });
     }
 };
+
+module.exports = withScrapeProtection(handler);

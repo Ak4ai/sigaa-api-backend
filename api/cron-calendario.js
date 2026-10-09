@@ -1,6 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const https = require('https');
+const { createCefetHttpsAgent } = require('../lib/cefet-tls');
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
@@ -32,7 +32,7 @@ async function processarCurso(curso) {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
-            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+            httpsAgent: createCefetHttpsAgent(),
             timeout: 10000
         });
 
@@ -77,7 +77,7 @@ async function processarCurso(curso) {
         const tempPdfPath = path.join(TEMP_DIR, `calendar_${curso}.pdf`);
         const pdfResponse = await axios.get(pdfLink, {
             responseType: 'arraybuffer',
-            httpsAgent: new https.Agent({ rejectUnauthorized: false })
+            httpsAgent: createCefetHttpsAgent()
         });
         fs.writeFileSync(tempPdfPath, pdfResponse.data);
 
