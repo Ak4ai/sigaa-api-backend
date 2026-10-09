@@ -1,3 +1,4 @@
+process.env.SESSION_DATA_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'sigaa-session-fixture-'));
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

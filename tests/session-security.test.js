@@ -1,176 +1,63 @@
-const { test, after } = require('node:test');
+const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
-
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sigaa-session-test-'));
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 process.env.SECRET = 'test-only-signing-secret';
 process.env.ENC_SECRET = 'a'.repeat(32);
 process.env.ENC_SECRET_USER = 'b'.repeat(32);
-process.env.TOKEN_REVOCATION_DIR = directory;
+process.env.SESSION_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sigaa-server-sessions-'));
 delete process.env.VERCEL;
-delete process.env.UPSTASH_REDIS_REST_URL;
-delete process.env.UPSTASH_REDIS_REST_TOKEN;
-const jwt = require('jsonwebtoken');
 const auth = require('../api/auth');
-const logout = require('../api/logout');
-const login = require('../api/login');
-
-// Remove somente os arquivos de teste conhecidos, sem exclusão recursiva.
-after(() => {
-    for (const name of fs.readdirSync(directory)) fs.unlinkSync(path.join(directory, name));
-    fs.rmdirSync(directory);
-});
-
-function response() {
-    return {
-        headers: {}, setHeader(name, value) { this.headers[name] = value; },
-        status(code) { this.code = code; return this; },
-        json(body) { this.body = body; return this; }, end() { return this; }
-    };
-}
-
 function child(script, data) {
-    const result = spawnSync(process.execPath, ['-e', script], {
-        cwd: path.resolve(__dirname, '..'), env: process.env,
-        input: JSON.stringify(data), encoding: 'utf8', timeout: 10000
-    });
-    assert.equal(result.status, 0, result.stderr || result.error?.message);
-    return result.stdout.trim();
+ const r=spawnSync(process.execPath,['-e',script],{cwd:path.resolve(__dirname,'..'),env:process.env,input:JSON.stringify(data),encoding:'utf8',timeout:10000});
+ assert.equal(r.status,0,r.stderr || r.error?.message);return r.stdout.trim();
 }
-
-test('logout revokes only the selected session and remains revoked in another process', async () => {
-    const payload = { user: 'test-user', pass: 'test-password' };
-    const token = auth.gerarTokenLogin(payload);
-    const other = auth.gerarTokenLogin(payload);
-    assert.deepEqual(payload, { user: 'test-user', pass: 'test-password' });
-    assert.notEqual(jwt.decode(token).jti, jwt.decode(other).jti);
-    assert.equal((await auth.validarTokenLogin(token)).user, 'test-user');
-    const res = response();
-    await logout({ method: 'POST', body: { token } }, res);
-    assert.equal(res.code, 200);
-    assert.equal(await auth.validarTokenLogin(token), null);
-    assert.equal((await auth.validarTokenLogin(other)).user, 'test-user');
-    const output = child(`
-        const auth = require('./api/auth');
-        const token = JSON.parse(require('fs').readFileSync(0, 'utf8')).token;
-        auth.validarTokenLogin(token).then(value => console.log(value === null));
-    `, { token });
-    assert.equal(output, 'true');
-    await logout({ method: 'POST', body: { token } }, res);
-    assert.equal(res.code, 200);
-    for (const name of fs.readdirSync(directory)) {
-        assert.match(name, /^[a-f0-9]{64}-\d+\.revoked$/);
-        assert.equal(fs.readFileSync(path.join(directory, name), 'utf8'), '');
-    }
+test('opaque sessions persist encrypted on the server and logout deletes only the selected session', async()=>{
+ const payload={user:'sensitive-test-user',pass:'sensitive-test-password'};
+ const id=auth.gerarTokenLogin(payload), other=auth.gerarTokenLogin(payload);
+ assert.match(id,/^s3_[A-Za-z0-9_-]{43}$/);assert.notEqual(id,other);
+ assert.deepEqual(payload,{user:'sensitive-test-user',pass:'sensitive-test-password'});
+ assert.equal((await auth.validarTokenLogin(id)).pass,payload.pass);
+ const disk=fs.readdirSync(process.env.SESSION_DATA_DIR).filter(n=>n.startsWith('sessions.sqlite')).map(n=>fs.readFileSync(path.join(process.env.SESSION_DATA_DIR,n))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0));
+ for(const secret of [payload.user,payload.pass,id])assert.ok(!disk.includes(Buffer.from(secret)));
+ assert.equal(child("const a=require('./api/auth');const id=JSON.parse(require('fs').readFileSync(0,'utf8')).id;a.validarTokenLogin(id).then(v=>console.log(v.user==='sensitive-test-user'));",{id}),'true');
+ await auth.revogarTokenLogin(id);assert.equal(await auth.validarTokenLogin(id),null);
+ assert.ok(await auth.validarTokenLogin(other));assert.equal(await auth.revogarTokenLogin(id),true);
+ assert.equal(child("const a=require('./api/auth');const id=JSON.parse(require('fs').readFileSync(0,'utf8')).id;a.validarTokenLogin(id).then(v=>console.log(v===null));",{id}),'true');
 });
-
-test('legacy JWT without jti is accepted before logout and rejected afterward', async () => {
-    const payload = jwt.decode(auth.gerarTokenLogin({ user: 'legacy', pass: 'password' }));
-    delete payload.jti;
-    const token = jwt.sign(payload, process.env.SECRET);
-    assert.equal((await auth.validarTokenLogin(token)).user, 'legacy');
-    assert.equal(await auth.revogarTokenLogin(token), true);
-    assert.equal(await auth.validarTokenLogin(token), null);
-    // Assinatura equivalente com padding não deve contornar a revogação.
-    const padded = `${token}=`;
-    assert.equal(await auth.validarTokenLogin(padded), null);
+test('expired, forged and legacy JWT sessions are rejected',async()=>{
+ assert.equal(await auth.validarTokenLogin(auth.gerarTokenLogin({user:'x',pass:'y'},-1)),null);
+ assert.equal(await auth.validarTokenLogin('s3_'+'a'.repeat(43)),null);
+ assert.equal(await auth.validarTokenLogin(require('jsonwebtoken').sign({user:'x',pass:'y'},process.env.SECRET)),null);
+ assert.equal(await auth.revogarTokenLogin('invalid'),false);
 });
-
-test('invalid, expired and non-HS256 tokens cannot authenticate', async () => {
-    assert.equal(await auth.validarTokenLogin('invalid'), null);
-    assert.equal(await auth.validarTokenLogin(auth.gerarTokenLogin({ user: 'x', pass: 'y' }, -1)), null);
-    assert.equal(await auth.validarTokenLogin(jwt.sign({ exp: Math.floor(Date.now() / 1000) + 60 }, process.env.SECRET, { algorithm: 'HS384' })), null);
-    const res = response();
-    await logout({ method: 'POST', body: { token: auth.gerarTokenLogin({ user: 'x', pass: 'y' }, -1) } }, res);
-    assert.equal(res.code, 200);
-    await logout({ method: 'POST', body: { token: 'invalid' } }, res);
-    assert.equal(res.code, 401);
-    await logout({ method: 'POST', body: { token: {} } }, res);
-    assert.equal(res.code, 400);
-    await logout({ method: 'GET', body: {} }, res);
-    assert.equal(res.code, 405);
+test('account replacement atomically erases the previous credentials',async()=>{
+ const previous=auth.gerarTokenLogin({user:'a',pass:'test'});
+ const next=auth.gerarTokenLogin({user:'b',pass:'test'},'7d',previous);
+ assert.equal(await auth.validarTokenLogin(previous),null);assert.equal((await auth.validarTokenLogin(next)).user,'b');
 });
-
-test('malformed login credentials return 400 instead of an unhandled rejection', async () => {
-    const res = response();
-    await login({ method: 'POST', body: { user: {}, pass: 'x' } }, res);
-    assert.equal(res.code, 400);
+test('tampered encrypted credentials fail closed and their session is deleted',async()=>{
+ const id=auth.gerarTokenLogin({user:'tamper-test',pass:'private'});
+ const {DatabaseSync}=require('node:sqlite');
+ const db=new DatabaseSync(path.join(process.env.SESSION_DATA_DIR,'sessions.sqlite'));
+ const key=require('node:crypto').createHash('sha256').update(id).digest('hex');
+ db.prepare('UPDATE sessions SET ciphertext=? WHERE id=?').run(Buffer.alloc(80).toString('base64'),key);
+ assert.equal(await auth.validarTokenLogin(id),null);
+ assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id=?').get(key).n,0);
+ db.close();
 });
-
-test('both scraper handlers reject revoked tokens before requesting SIGAA', () => {
-    child(`
-        const assert = require('node:assert/strict');
-        const auth = require('./api/auth');
-        (async () => {
-            const token = auth.gerarTokenLogin({ user: 'x', pass: 'y' });
-            await auth.revogarTokenLogin(token);
-            for (const name of ['./api/scraper', './api/scraper_new']) {
-                const res = { setHeader(){}, status(code){this.code=code;return this;}, json(){return this;} };
-                await require(name)({ method: 'POST', body: { token } }, res);
-                assert.equal(res.code, 401);
-            }
-            process.exit(0);
-        })().catch(() => process.exit(1));
-    `, {});
+test('serverless refuses ephemeral session storage',()=>{
+ child("process.env.VERCEL='1';const a=require('./api/auth');require('node:assert/strict').throws(()=>a.gerarTokenLogin({user:'x',pass:'y'}));",{});
 });
-
-test('serverless without shared storage fails closed', () => {
-    child(`
-        process.env.VERCEL = '1';
-        const assert = require('node:assert/strict');
-        const auth = require('./api/auth');
-        const logout = require('./api/logout');
-        (async () => {
-            const token = auth.gerarTokenLogin({ user: 'x', pass: 'y' });
-            await assert.rejects(auth.validarTokenLogin(token));
-            const res = { setHeader(){}, status(code){this.code=code;return this;}, json(){return this;} };
-            await logout({ method:'POST', body:{token} }, res);
-            assert.equal(res.code,503);
-        })().catch(() => process.exit(1));
-    `, {});
+test('both scrapers reject deleted sessions without SIGAA requests',()=>{
+ child(`(async()=>{const a=require('./api/auth'),assert=require('node:assert/strict');const id=a.gerarTokenLogin({user:'x',pass:'y'});await a.revogarTokenLogin(id);for(const name of ['./api/scraper','./api/scraper_new']){const r={setHeader(){},status(c){this.code=c;return this;},json(){return this;}};await require(name)({method:'POST',body:{token:id}},r);assert.equal(r.code,401);}})().catch(()=>process.exit(1));`,{});
 });
-
-test('Redis storage shares revocations, sets expiry and rejects storage outages', () => {
-    child(`
-        process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
-        process.env.UPSTASH_REDIS_REST_TOKEN = 'test-only-redis-token';
-        const assert = require('node:assert/strict');
-        const data = new Map(); let outage = false;
-        global.fetch = async (url, options) => {
-            if (outage) throw new Error('offline');
-            assert.equal(url, process.env.UPSTASH_REDIS_REST_URL);
-            assert.equal(options.redirect, 'error');
-            const command = JSON.parse(options.body);
-            let result;
-            if(command[0] === 'SET') {
-                assert.equal(command[3], 'EXAT');
-                assert.ok(command[4] > Date.now()/1000);
-                data.set(command[1], command[2]); result = 'OK';
-            } else { result = data.has(command[1]) ? 1 : 0; }
-            return {ok:true,json:async()=>({result})};
-        };
-        const auth = require('./api/auth');
-        (async()=>{
-            const token = auth.gerarTokenLogin({user:'x',pass:'y'});
-            assert.ok(await auth.validarTokenLogin(token));
-            await auth.revogarTokenLogin(token);
-            assert.equal(await auth.validarTokenLogin(token),null);
-            const storePath = require.resolve('./lib/token-revocations');
-            delete require.cache[storePath];
-            assert.equal(await require(storePath).isRevoked(token, require('jsonwebtoken').decode(token)),true);
-            outage = true;
-            await assert.rejects(auth.validarTokenLogin(token));
-            await assert.rejects(auth.revogarTokenLogin(token));
-        })().catch(()=>process.exit(1));
-    `, {});
-});
-
 test('actual Express routes revoke tokens and reject replay without contacting SIGAA', () => {
     child(`
         process.env.PORT = '0';
+        require.cache[require.resolve('./lib/sigaa-login')]={exports:{verifySigaaLogin:async()=>true}};
         const assert = require('node:assert/strict');
         const cronPath = require.resolve('./api/cron-calendario');
         require.cache[cronPath] = { exports: { atualizarCalendariosBackground: async () => {} } };

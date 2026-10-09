@@ -1,3 +1,4 @@
+process.env.SESSION_DATA_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'sigaa-session-fixture-'));
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,6 +14,11 @@ delete process.env.UPSTASH_REDIS_REST_TOKEN;
 const express = require('express');
 const sessions = require('../lib/browser-session');
 const auth = require('../api/auth');
+require.cache[require.resolve('../lib/sigaa-login')] = { exports: { verifySigaaLogin: async user => {
+    if (user === 'invalid') throw Object.assign(new Error('Invalid credentials'), {status:401});
+    if (user === 'offline') throw new Error('SIGAA unavailable');
+    return true;
+} } };
 const app = express();
 app.use(express.json());
 app.use('/api', sessions.middleware);
@@ -64,6 +70,14 @@ test('real HTTP cookies protect login and logout from CSRF, never expose JWT, an
         const sessionCookie = login.headers.getSetCookie().find(c => c.startsWith('sigaa_session='));
         assert.ok(sessionCookie.includes('HttpOnly') && sessionCookie.includes('SameSite=Lax') && sessionCookie.includes('Max-Age=604800'));
         const token = jar.get('sigaa_session');
+        assert.match(token, /^s3_[A-Za-z0-9_-]{43}$/);
+        for (const [user, status] of [['invalid',401], ['offline',503]]) {
+            const denied = await request('/api/login', {user,pass:'test'});
+            assert.equal(denied.status, status);
+            assert.ok(!denied.headers.getSetCookie().some(c=>c.startsWith('sigaa_session=')));
+            assert.equal(jar.get('sigaa_session'),token);
+            assert.equal((await auth.validarTokenLogin(token)).user,'a');
+        }
         const restored = await (await request('/api/session')).json();
         assert.equal(restored.user, 'a');
         assert.equal(restored.token, undefined);
@@ -80,9 +94,8 @@ test('real HTTP cookies protect login and logout from CSRF, never expose JWT, an
         assert.equal(jar.has('sigaa_session'), false);
         assert.equal(await auth.validarTokenLogin(secondToken), null);
         assert.equal((await (await request('/api/session')).json()).loggedIn, false);
-        const old = require('jsonwebtoken').decode(auth.gerarTokenLogin({ user: 'old', pass: 'test' }));
-        delete old.sessionVersion;
-        assert.equal(await auth.validarTokenLogin(require('jsonwebtoken').sign(old, process.env.SECRET)), null);
+        const old = require('jsonwebtoken').sign({user:'old',pass:'test',exp:Math.floor(Date.now()/1000)+3600}, process.env.SECRET);
+        assert.equal(await auth.validarTokenLogin(old), null);
         const headers = new Map();
         const secureResponse = { setHeader(k,v) { headers.set(k,v); }, getHeader(k) { return headers.get(k); } };
         const productionRequest = { protocol: 'https', headers: { host: 'ak4ai-sigaa.duckdns.org', origin: 'https://ak4ai-sigaa.duckdns.org' } };

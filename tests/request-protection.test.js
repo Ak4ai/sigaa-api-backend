@@ -113,6 +113,8 @@ test('HTTP routes enforce payload size, auth rate, queue admission and runtime c
             running--;
         }};
         require.cache[require.resolve('./api/cron-calendario')]={exports:{atualizarCalendariosBackground:async()=>{}}};
+        process.env.SESSION_DATA_DIR=require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'sigaa-request-sessions-'));
+        require.cache[require.resolve('./lib/sigaa-login')]={exports:{verifySigaaLogin:async()=>true}};
         const express=require('express'),listen=express.application.listen;
         express.application.listen=function(...args){
             const server=listen.apply(this,args);

@@ -1,60 +1,15 @@
-# Sessão em cookie HttpOnly
+# Server-side authenticated sessions
 
-O login não retorna JWT ao JavaScript. A sessão fica em cookie
-`__Host-sigaa_session`, com `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` e sem
-`Domain`. A opção manter conectado define Max-Age de sete dias; caso contrário,
-o cookie dura a sessão do navegador. HTTP sem Secure é permitido somente no
-desenvolvimento com host localhost/127.0.0.1. Não há fallback de HTTPS para HTTP.
+Login creates a session only after the SIGAA HTTPS login succeeds and the authenticated student portal identifies the user. Invalid credentials, pending academic notices, missing portal identity, timeouts and upstream failures do not create a session or replace the existing account.
 
-`GET /api/session` confirma o cookie e retorna apenas usuário, expiração e uma
-prova de CSRF. O frontend guarda somente metadados, nunca o JWT. A prova de CSRF
-fica em memória; é um HMAC de um nonce aleatório em outro cookie HttpOnly. Login
-e qualquer POST com cookie exigem `X-CSRF-Token`. Origens não autorizadas e
-pedidos identificados pelo navegador como cross-site são recusados. CORS permite
-credenciais somente para a origem da aplicação e a origem local do backend.
+The HttpOnly, Secure, SameSite=Lax cookie contains only an opaque `s3_` identifier with 256 random bits. No JWT, password or username is embedded in it. Only a SHA-256 fingerprint of the identifier is stored in `data/sessions/sessions.sqlite`. Credentials are encrypted on the server with AES-256-GCM and a key derived from the existing encryption secrets. Session records are authenticated cryptographically and files are private.
 
-`POST /api/logout`, com `{}`, revoga o JWT recebido pelo cookie antes de apagá-lo.
-Falhas de armazenamento mantêm a sessão para nova tentativa. Trocar de conta
-revoga a sessão anterior. JWTs anteriores à versão 2 são recusados mesmo que
-ainda não tenham expirado: a atualização exige novo login.
+Sessions expire after seven days with Remember me, or twelve hours otherwise. Without Remember me the browser cookie has no persistent Max-Age. Expired sessions are deleted on access and during periodic cleanup. Logout deletes the server record before clearing the cookie; account replacement creates the new session and deletes the previous record in one transaction. Invalid login attempts leave the previous session intact. Storage failures fail closed.
 
-A interface publicada no GitHub Pages encaminha para
-`https://ak4ai-sigaa.duckdns.org/`, que hospeda a interface e a API juntas.
-Isso evita depender de cookies de terceiros bloqueados por navegadores.
-O endereço antigo apaga seus tokens locais antes de encaminhar. Preferências e
-perfis salvos são específicos de cada origem e não são transferidos ao servidor.
+All former credential-bearing JWTs are rejected. Users must log in again after this migration. The frontend keeps only nonsecret account and expiration metadata. Existing CSRF, origin checks, CSP and same-origin hosting remain in effect.
 
-As credenciais continuam criptografadas dentro do JWT no cookie. Migrar para um
-identificador de sessão com credenciais somente no servidor é uma etapa separada.
+Preserve the whole `data/` directory during releases. The controlled deployment shares it through `sigaa-shared`, checks encrypted storage and deletion, and verifies that a real invalid SIGAA login cannot create a cookie before switching services. Session credentials must not be included in logs or repository history. Backups need the same private permissions and retention controls as live data.
 
-## VPS e desenvolvimento local
+This storage supports the current VPS and processes sharing its local SQLite database. It deliberately refuses Vercel ephemeral storage. Multiple servers require a shared session store before they can be used. Do not repurpose the old token-revocation Redis configuration for sessions.
 
-Por padrão, as revogações ficam em `data/token-revocations/`, ignorado pelo Git.
-Elas sobrevivem à reinicialização do processo. Os processos no mesmo servidor
-precisam usar o mesmo diretório. Não apague esse diretório durante deploys.
-Para mantê-lo fora do checkout, configure `TOKEN_REVOCATION_DIR` para um diretório
-persistente com permissão de escrita para o usuário que executa o backend.
-
-## Serverless e servidores diferentes
-
-Configure `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` no ambiente, usando
-um banco compartilhado, persistente e sem remoção de chaves antes do TTL.
-Todos os servidores precisam usar esse mesmo banco. O cliente usa o protocolo
-[Redis REST](https://upstash.com/docs/redis/features/restapi), via HTTPS, com
-`EXISTS` e `SET ... EXAT`. Configure o endpoint primário para consistência de leitura.
-Não salve credenciais reais nos arquivos versionados.
-
-Em Vercel, o backend recusa consultas com token e logout se Redis não estiver
-configurado; o disco efêmero não é usado como alternativa. Se o armazenamento
-falhar, a API retorna 503 e o frontend mantém a sessão local para permitir uma
-nova tentativa de logout.
-
-Publique primeiro o backend e depois o frontend. O logout já pode revogar tokens
-emitidos antes dessa atualização, sem trocar os segredos existentes. Consultas
-que já estavam em andamento podem terminar no servidor; o frontend descarta
-resultados recebidos depois do logout.
-
-Execute `npm test` no backend para verificar revogação, persistência, tokens
-antigos, falhas de armazenamento e as rotas Express. No diretório do frontend,
-execute `node --test tests/session-security.test.js` para verificar o transporte
-HTTPS e a confirmação do logout antes de apagar os dados locais.
+Run `npm test` in the backend and `node tests/login-profile-browser.cjs` in the frontend. Successful authentication is tested against SIGAA fixtures; production rejected-login checks use synthetic invalid credentials and do not require a real user's password.

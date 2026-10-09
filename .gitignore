@@ -44,3 +44,5 @@ temp/
 *.swo
 
 data/exams/
+
+data/sessions/

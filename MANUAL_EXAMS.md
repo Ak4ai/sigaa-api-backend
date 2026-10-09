@@ -2,7 +2,7 @@
 
 O cadastro no site exige sessão em cookie HttpOnly válida, não revogada, e uma consulta bem-sucedida ao
 portal autenticado do SIGAA com o mesmo token nas últimas 24 horas. Emitir um
-token em `/api/login` não autoriza o cadastro. A consulta confirma disciplina,
+identificador de sessão em `/api/login` não autoriza sozinho o cadastro. A consulta confirma disciplina,
 turma e semestre; esses campos nunca são aceitos como autorização no POST.
 
 `POST /api/calendario/eventos` recebe `{ turmaId, data, titulo }`. O limite é de

@@ -82,17 +82,34 @@ def probe(port,sha):
         headers={'Content-Type':'application/json'}
         if csrf: headers['X-CSRF-Token']=csrf
         req=urllib.request.Request(f'http://127.0.0.1:{port}{endpoint}',data=json.dumps(data).encode() if data is not None else None,headers=headers)
-        with opener.open(req,timeout=5) as response:return json.load(response)
+        with opener.open(req,timeout=40 if endpoint=='/api/login' else 5) as response:return json.load(response)
     csrf=browser_request('/api/session')['csrf']
-    session=browser_request('/api/login',{'user':'deployment-smoke','pass':'not-a-real-password'})
-    if 'token' in session or not session.get('cookie'):raise RuntimeError('Unsafe login response')
-    csrf=session['csrf']
-    token=next(cookie.value for cookie in jar if cookie.name=='sigaa_session')
+    try: browser_request('/api/login',{'user':'deployment-smoke','pass':'not-a-real-password'})
+    except urllib.error.HTTPError as error:
+        if error.code!=401:raise RuntimeError('SIGAA rejected-login probe failed: '+str(error.code))
+    else:raise RuntimeError('Unverified credentials created a session')
+    if any(cookie.name in ['sigaa_session','__Host-sigaa_session'] for cookie in jar):raise RuntimeError('Rejected login set a session cookie')
     if not browser_request('/api/logout',{}).get('success'): raise RuntimeError('Logout failed')
-    try: browser_request('/api/scraper',{'token':token})
+    try: browser_request('/api/scraper',{'token':'s3_'+'a'*43})
     except urllib.error.HTTPError as error:
         if error.code!=401: raise
     else: raise RuntimeError('Revoked token accepted')
+
+def session_store_probe(backend,node,env):
+    code=r'''
+require('dotenv').config({quiet:true});
+const auth=require('./api/auth');
+(async()=>{
+ const id=auth.gerarTokenLogin({user:'deployment-storage-probe',pass:'unused-test-credential'},60);
+ if(!/^s3_[A-Za-z0-9_-]{43}$/.test(id))throw new Error('Unsafe session identifier');
+ try{
+  if((await auth.validarTokenLogin(id))?.user!=='deployment-storage-probe')throw new Error('Session storage failed');
+ }finally{await auth.revogarTokenLogin(id);}
+ if(await auth.validarTokenLogin(id))throw new Error('Session deletion failed');
+ console.log('ok');
+})().catch(()=>{console.error('Persistent session probe failed');process.exitCode=1;});
+'''
+    if run([str(node),'-e',code],cwd=backend,env=env,timeout=10)!='ok':raise RuntimeError('Session storage probe failed')
 
 def calendar_probe(backend,node,env):
     if not (backend/'lib/calendar-download.js').exists():return
@@ -151,6 +168,7 @@ def main():
     run([str(node.parent/'npm'),'ci','--omit=dev','--ignore-scripts'],cwd=backend,env=env,timeout=180)
     run([str(node.parent/'npm'),'audit','--omit=dev','--audit-level=low'],cwd=backend,env=env,timeout=60)
     run([str(node),'--test',*map(str,sorted((backend/'tests').glob('*.test.js')))],cwd=backend,env=env,timeout=90)
+    log('Checking encrypted persistent session storage');session_store_probe(backend,node,env)
     with socket.socket() as sock: sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     candidate_env=env.copy();candidate_env.update(PORT=str(port),HOST='127.0.0.1',RELEASE_VERSION=sha,DISABLE_CALENDAR_CRON='1')
     for key in ['SECRET','ENC_SECRET','ENC_SECRET_USER']: candidate_env.pop(key,None)
