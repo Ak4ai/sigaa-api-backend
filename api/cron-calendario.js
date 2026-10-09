@@ -1,14 +1,12 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
-const { createCefetHttpsAgent } = require('../lib/cefet-tls');
+const { fetchPage, downloadPdf, selectCalendarPdfLink, PAGES } = require('../lib/calendar-download');
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 
 // Pastas de cache e temporária
-const CACHE_DIR = path.resolve(__dirname, '../cache');
-const TEMP_DIR = path.resolve(__dirname, '../temp');
+const CACHE_DIR = process.env.CALENDAR_CACHE_DIR || path.resolve(__dirname, '../cache');
+const TEMP_DIR = process.env.CALENDAR_TEMP_DIR || path.resolve(__dirname, '../temp');
 
 // Cria as pastas se não existirem
 fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -22,32 +20,12 @@ async function processarCurso(curso) {
         return;
     }
 
-    const targetUrl = curso === 'mecatronica'
-        ? 'https://www.eng-mecatronica.divinopolis.cefetmg.br/calendario-letivo/'
-        : 'https://www.eng-computacao.divinopolis.cefetmg.br/2019/03/18/calendario-letivo/';
+    const targetUrl = PAGES[curso];
 
     try {
         console.log(`[CRON-CALENDARIO] [${curso}] Buscando página para obter link do PDF...`);
-        const response = await axios.get(targetUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            httpsAgent: createCefetHttpsAgent(),
-            timeout: 10000
-        });
-
-        const $ = cheerio.load(response.data);
-        let pdfLink = $('ul.wp-block-list a').first().attr('href');
-
-        if (!pdfLink) {
-            $('a').each((i, el) => {
-                const href = $(el).attr('href');
-                const text = $(el).text().trim();
-                if (href && href.toLowerCase().includes('.pdf') && (text.toLowerCase().includes('calendário') || text.toLowerCase().includes('calendario'))) {
-                    if (!pdfLink) pdfLink = href;
-                }
-            });
-        }
+        const page = await fetchPage(targetUrl);
+        const pdfLink = selectCalendarPdfLink(page.html, page.url);
 
         if (!pdfLink) {
             console.error(`[CRON-CALENDARIO] [${curso}] Link do PDF do calendário não encontrado.`);
@@ -75,10 +53,7 @@ async function processarCurso(curso) {
 
         // Faz o download do PDF
         const tempPdfPath = path.join(TEMP_DIR, `calendar_${curso}.pdf`);
-        const pdfResponse = await axios.get(pdfLink, {
-            responseType: 'arraybuffer',
-            httpsAgent: createCefetHttpsAgent()
-        });
+        const pdfResponse = await downloadPdf(pdfLink);
         fs.writeFileSync(tempPdfPath, pdfResponse.data);
 
         // Upload do arquivo para a File Manager API do Gemini

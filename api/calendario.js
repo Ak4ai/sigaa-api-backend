@@ -1,9 +1,8 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
-const { createCefetHttpsAgent } = require('../lib/cefet-tls');
+const { fetchPage, selectCalendarPdfLink, PAGES } = require('../lib/calendar-download');
 
 // Cache em memória para evitar requisições excessivas à página externa (separado por curso)
 const cache = {};
+const pending = {};
 const CACHE_DURATION = 1 * 60 * 60 * 1000; // 1 hora de cache
 
 module.exports = async function handler(req, res) {
@@ -17,9 +16,7 @@ module.exports = async function handler(req, res) {
     }
 
     const curso = req.query.curso === 'mecatronica' ? 'mecatronica' : 'computacao';
-    const targetUrl = curso === 'mecatronica'
-        ? 'https://www.eng-mecatronica.divinopolis.cefetmg.br/calendario-letivo/'
-        : 'https://www.eng-computacao.divinopolis.cefetmg.br/2019/03/18/calendario-letivo/';
+    const targetUrl = PAGES[curso];
 
     // Verifica se temos no cache e ainda está válido
     const now = Date.now();
@@ -30,32 +27,9 @@ module.exports = async function handler(req, res) {
 
     try {
         console.log(`[CALENDARIO] [${curso}] Buscando calendário da página externa...`);
-        const response = await axios.get(targetUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            httpsAgent: createCefetHttpsAgent(),
-            timeout: 5000 // timeout de 5 segundos
-        });
-
-        const html = response.data;
-        const $ = cheerio.load(html);
-        
-        // Tenta primeiro o seletor padrão (primeiro link dentro de ul.wp-block-list)
-        let primeiroLink = $('ul.wp-block-list a').first().attr('href');
-
-        // Se não encontrar, tenta buscar o primeiro link para um PDF que tenha a palavra "calendário" no texto
-        if (!primeiroLink) {
-            $('a').each((i, el) => {
-                const href = $(el).attr('href');
-                const text = $(el).text().trim();
-                if (href && href.toLowerCase().includes('.pdf') && (text.toLowerCase().includes('calendário') || text.toLowerCase().includes('calendario'))) {
-                    if (!primeiroLink) {
-                        primeiroLink = href;
-                    }
-                }
-            });
-        }
+        const primeiroLink = await (pending[curso] || (pending[curso] = fetchPage(targetUrl)
+            .then(page => selectCalendarPdfLink(page.html, page.url))
+            .finally(() => { delete pending[curso]; })));
 
         if (primeiroLink) {
             cache[curso] = {

@@ -94,6 +94,26 @@ def probe(port,sha):
         if error.code!=401: raise
     else: raise RuntimeError('Revoked token accepted')
 
+def calendar_probe(backend,node,env):
+    if not (backend/'lib/calendar-download.js').exists():return
+    code=r'''
+const client=require('./lib/calendar-download');
+(async()=>{
+ const results=[];
+ for(const [course,url] of Object.entries(client.PAGES)){
+  const page=await client.fetchPage(url);
+  const link=client.selectCalendarPdfLink(page.html,page.url);
+  if(!link)throw new Error('Calendar PDF link missing: '+course);
+  const pdf=await client.downloadPdf(link);
+  results.push({course,bytes:pdf.data.length});
+ }
+ console.log(JSON.stringify(results));
+})().catch(error=>{console.error(error.message);process.exitCode=1;});
+'''
+    log('Validating real CEFET calendar PDFs before switching the API')
+    results=json.loads(run([str(node),'-e',code],cwd=backend,env=env,timeout=130))
+    log('Calendar downloads validated: '+', '.join(item['course']+' '+str(item['bytes'])+' bytes' for item in results))
+
 def main():
     refs=[sys.argv[1] if len(sys.argv)>1 else 'main',sys.argv[2] if len(sys.argv)>2 else 'main']
     if any(ref!='main' and not re.fullmatch('[a-f0-9]{40}',ref) for ref in refs): raise RuntimeError('Invalid commit')
@@ -140,6 +160,7 @@ def main():
     switched=stopped=installed=False
     try:
         log('Checking candidate while current API stays online');probe(port,sha)
+        calendar_probe(backend,node,env)
         (release/'deployment.json').write_text(json.dumps({'backend':sha,'frontend':front_sha,'node':version})+'\n')
         switched=True;configure_proxy(proxy_config(old_proxy,port))
         log('Proxy switched; draining previous backend')
