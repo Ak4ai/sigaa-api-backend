@@ -132,6 +132,8 @@ const client=require('./lib/calendar-download');
     log('Calendar downloads validated: '+', '.join(item['course']+' '+str(item['bytes'])+' bytes' for item in results))
 
 def main():
+    if Path('/etc/sigaa-hardened.json').exists():
+        os.execv(sys.executable,[sys.executable,str(Path(__file__).with_name('deploy-hardened.py')),*sys.argv[1:]])
     refs=[sys.argv[1] if len(sys.argv)>1 else 'main',sys.argv[2] if len(sys.argv)>2 else 'main']
     if any(ref!='main' and not re.fullmatch('[a-f0-9]{40}',ref) for ref in refs): raise RuntimeError('Invalid commit')
     nodes=sorted((home/'.local/lib').glob('node-v24.*-linux-x64/bin/node'),key=lambda p:tuple(map(int,p.parent.parent.name.split('-')[1][1:].split('.'))))

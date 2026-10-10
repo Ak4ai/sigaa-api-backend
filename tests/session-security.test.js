@@ -91,6 +91,9 @@ test('actual Express routes revoke tokens and reject replay without contacting S
                     assert.equal((await post('/api/scraper', {token})).status, 401);
                     assert.equal((await post('/api/logout', {token})).status, 200);
                     const page = await fetch(base + '/');
+                    for (const hidden of ['/.git/config', '/.git/HEAD', '/.env', '/%2egit/config']) {
+                        assert.ok([403, 404].includes((await fetch(base + hidden)).status));
+                    }
                     if (page.status === 200) {
                         const html = await page.text();
                         assert.ok(!html.includes('<script>'));

@@ -126,7 +126,7 @@ app.get('/', (req, res) => {
 });
 
 // Serve arquivos estáticos do frontend (css, js, imagens)
-app.use(express.static(FRONTEND_DIR));
+app.use(express.static(FRONTEND_DIR, { dotfiles: 'deny' }));
 
 // Agendador diário para verificar e atualizar calendários (24 horas)
 const CRON_INTERVAL_MS = 24 * 60 * 60 * 1000;
