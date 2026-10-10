@@ -26,7 +26,8 @@ module.exports = async function handler(req, res) {
         if (req.method === 'POST') {
             if (!token) return res.status(401).json({ error: 'Entre na sua conta para cadastrar provas.' });
             if (!access) return res.status(403).json({ error: 'Atualize seus dados no SIGAA para confirmar suas turmas.' });
-            const result = exams.add(access, req.body || {});
+            const body = req.body || {};
+            const result = body.acao === 'remover' ? exams.remove(access, body) : exams.add(access, body);
             return res.status(result.status).json(result);
         }
         const course = req.query.curso === 'mecatronica' ? 'mecatronica' : 'computacao';

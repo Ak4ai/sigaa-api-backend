@@ -26,6 +26,11 @@ app.get('/api/session', sessions.sessionHandler);
 app.post('/api/login', require('../api/login'));
 app.post('/api/logout', require('../api/logout'));
 let scrapeCalls = 0;
+let calendarWrites = 0;
+app.post('/api/calendario/eventos', (req, res) => {
+    calendarWrites++;
+    res.json({success:true});
+});
 app.post('/api/scraper', async (req, res) => {
     const payload = await auth.validarTokenLogin(req.body.token);
     if (!payload) return res.status(401).json({ error: 'Invalid session' });
@@ -84,6 +89,12 @@ test('real HTTP cookies protect login and logout from CSRF, never expose JWT, an
         assert.equal((await request('/api/scraper', { clientId: 'cookie-test' }, { 'X-CSRF-Token': '0'.repeat(64) })).status, 403);
         assert.equal(scrapeCalls, 0);
         assert.equal((await request('/api/scraper', { clientId: 'cookie-test' })).status, 200);
+        const removal = { acao: 'remover', provaId: '11111111-1111-4111-8111-111111111111' };
+        assert.equal((await request('/api/calendario/eventos', removal, { 'X-CSRF-Token': '0'.repeat(64) })).status, 403);
+        assert.equal(calendarWrites, 0, 'forged CSRF cannot reach calendar removal');
+        assert.equal((await request('/api/calendario/eventos', removal, { Origin: 'https://attacker.example' })).status, 403);
+        assert.equal((await request('/api/calendario/eventos', removal)).status, 200);
+        assert.equal(calendarWrites, 1);
         const second = await request('/api/login', { user: 'second', pass: 'test' });
         assert.equal(second.status, 200);
         csrf = (await second.json()).csrf;

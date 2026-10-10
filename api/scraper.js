@@ -1,4 +1,5 @@
 const { recordAcademicAccess } = require('../lib/manual-exams');
+const { parseScheduleRaw } = require('../lib/academic-roster');
 // scraper.js — implementação axios+cheerio substituindo Puppeteer
 // Mantém exatamente o mesmo contrato de resposta JSON:
 // { dadosInstitucionais, horariosDetalhados, horariosSimplificados, avisosPorDisciplina }
@@ -208,35 +209,6 @@ function parseDadosInstitucionais(html) {
 }
 
 // Extrai horários brutos para alimentar o scheduleParser (mesma estrutura que o Puppeteer produzia)
-function parseScheduleRaw(html) {
-    const $ = load(html);
-    const data = [];
-    let term = '';
-
-    $('tbody tr').each((_, row) => {
-        const $row = $(row);
-        const span = $row.find('td[colspan]');
-
-        if (span.length) {
-            term = span.text().trim();
-            return;
-        }
-
-        if ($row.find('form[id^="form_acessarTurmaVirtual"]').length) {
-            const desc = $row.find('td.descricao');
-            const name = desc.find('a').text().trim() || desc.text().trim();
-
-            const infos = $row.find('td.info').map((_, td) => $(td).text().trim()).get();
-            const turmaInfo = infos[0] || '';
-            const rawCodes = (infos[1] || '').split('(')[0].trim();
-            const sala = (infos[2] || '').trim();
-
-            data.push({ semestre: term, disciplina: name, turma: turmaInfo, rawCodes, sala });
-        }
-    });
-
-    return data;
-}
 
 // Extrai avisos do AVA (.menu-direita > li)
 function parseAvisos(html) {
