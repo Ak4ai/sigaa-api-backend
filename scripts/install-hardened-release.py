@@ -25,12 +25,16 @@ def snapshot(source, target):
 def private_state():
     user, group = pwd.getpwnam('sigaa'), grp.getgrnam('sigaa')
     for root, dirs, files in os.walk(STATE, followlinks=False):
-        os.chown(root, user.pw_uid, group.gr_gid); os.chmod(root, 0o700)
+        if Path(root) == STATE:
+            os.chown(root, 0, group.gr_gid); os.chmod(root, 0o750)
+        else:
+            os.chown(root, user.pw_uid, group.gr_gid); os.chmod(root, 0o700)
         for name in files:
             path = Path(root)/name
             if path.is_symlink(): raise RuntimeError('Unexpected state symlink')
             os.chown(path, user.pw_uid, group.gr_gid); os.chmod(path, 0o600)
     os.chown(STATE/'.env', 0, group.gr_gid); os.chmod(STATE/'.env', 0o640)
+    os.chown(STATE, 0, group.gr_gid); os.chmod(STATE, 0o750)
 
 def switch(target):
     temporary = BASE/'current.next'
@@ -105,7 +109,7 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/sigaa
+ReadWritePaths=/var/lib/sigaa/data /var/lib/sigaa/cache /var/lib/sigaa/temp
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
