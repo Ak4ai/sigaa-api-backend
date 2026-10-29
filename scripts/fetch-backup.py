@@ -6,8 +6,11 @@ import subprocess, json, re, os, time, sys, shlex
 def main():
     home=Path.home();destination=home/'Documents/SIGAA_Backups'
     destination.mkdir(parents=True,exist_ok=True)
-    options=['-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=10','-i',str(home/'.ssh/sigaa_oracle_ed25519')]
-    target='ubuntu@163.176.42.177'
+    # O servidor e a chave SSH vem do ambiente, para nao ficarem no repositorio publico.
+    target=os.environ.get('SIGAA_SSH_TARGET','').strip()   # ex.: usuario@host
+    key=os.environ.get('SIGAA_SSH_KEY','').strip() or str(home/'.ssh/id_ed25519')
+    if not target:raise RuntimeError('Defina SIGAA_SSH_TARGET (usuario@host) e, se preciso, SIGAA_SSH_KEY')
+    options=['-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=10','-i',key]
     code="from pathlib import Path;files=sorted(Path('/var/backups/sigaa').glob('sigaa-*.enc'));print(files[-1].name if files else '')"
     result=subprocess.run(['ssh',*options,target,'python3 -c '+shlex.quote(code)],capture_output=True,text=True,timeout=30)
     name=result.stdout.strip()

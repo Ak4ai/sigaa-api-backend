@@ -6,7 +6,7 @@ O deploy preserva o runtime anterior, os segredos e os dados.
 Depois de publicar os commits dos dois reposit?rios:
 
 ```powershell
-ssh -i "$HOME\.ssh\sigaa_oracle_ed25519" ubuntu@163.176.42.177 "~/deploy.sh"
+ssh -i "$HOME\.ssh\<SUA_CHAVE>" <USUARIO>@<IP_DO_SERVIDOR> "~/deploy.sh"
 ```
 
 Para fixar os commits, passe os hashes completos do backend e do frontend:
@@ -35,3 +35,13 @@ curl https://ak4ai-sigaa.duckdns.org/api/health
 
 Publique o backend e valide a API antes de atualizar a branch `main` da interface
 no GitHub Pages. Nunca copie `.env` ou chaves SSH para commits ou artefatos publicos.
+
+## Download dos backups cifrados
+
+`scripts/fetch-backup.py` le o servidor e a chave SSH do ambiente (nao ficam no repositorio):
+
+```powershell
+$env:SIGAA_SSH_TARGET = "<USUARIO>@<IP_DO_SERVIDOR>"
+$env:SIGAA_SSH_KEY = "$HOME\.ssh\<SUA_CHAVE>"   # opcional
+python scripts/fetch-backup.py
+```
